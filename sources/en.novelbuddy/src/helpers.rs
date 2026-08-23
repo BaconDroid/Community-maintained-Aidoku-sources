@@ -205,30 +205,6 @@ fn is_ad_marker(value: &str) -> bool {
 		|| value.contains("banner")
 }
 
-/// Remove ad-placement elements before conversion so they do not leak into
-/// the chapter body.
-fn remove_ad_nodes(doc: &aidoku::imports::html::Document) {
-	let mut to_remove = Vec::new();
-
-	if let Some(elements) = doc.select("*") {
-		for element in elements {
-			let matches = element
-				.class_name()
-				.as_deref()
-				.map(is_ad_marker)
-				.unwrap_or(false)
-				|| element.id().as_deref().map(is_ad_marker).unwrap_or(false);
-			if matches {
-				to_remove.push(element);
-			}
-		}
-	}
-
-	for el in to_remove {
-		el.remove();
-	}
-}
-
 /// Convert a description to plain text. Descriptions should not contain
 /// Markdown markers, since they are displayed as metadata rather than as a
 /// `PageContent` body.
@@ -262,7 +238,13 @@ fn escape_markdown(text: &str, output: &mut String) {
 	}
 }
 
-fn convert_element_to_markdown(element: &Element, output: &mut String) {
+/// Append an element's direct text and child elements in document order.
+///
+/// `child_nodes` yields text nodes (whose text is only reachable there),
+/// while `children` yields elements with reliable tag names; element-kind
+/// nodes are therefore paired with the next entry from `children`.
+fn convert_children_to_markdown(element: &Element, output: &mut String) {
+	let mut elements = element.children();
 	for node in element.child_nodes() {
 		match node.kind() {
 			Kind::TextNode => {
@@ -271,8 +253,8 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 				}
 			}
 			Kind::Element => {
-				if let Ok(element) = Element::try_from(node) {
-					convert_tag_to_markdown(&element, output);
+				if let Some(child) = elements.next() {
+					convert_element_to_markdown(&child, output);
 				}
 			}
 			_ => {}
@@ -280,11 +262,27 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 	}
 }
 
-fn convert_tag_to_markdown(element: &Element, output: &mut String) {
+/// Whether this element is an ad placement, based on its class or id.
+///
+/// DOM removal via `Element::remove` proved unreliable on selected elements,
+/// so placements are skipped during conversion instead.
+fn is_ad_placement(element: &Element) -> bool {
+	element
+		.class_name()
+		.as_deref()
+		.map(is_ad_marker)
+		.unwrap_or(false)
+		|| element.id().as_deref().map(is_ad_marker).unwrap_or(false)
+}
+
+fn convert_element_to_markdown(element: &Element, output: &mut String) {
+	if is_ad_placement(element) {
+		return;
+	}
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
 		"p" => {
-			convert_element_to_markdown(element, output);
+			convert_children_to_markdown(element, output);
 			output.push_str("\n\n");
 		}
 		"br" => output.push_str("  \n"),
@@ -294,57 +292,35 @@ fn convert_tag_to_markdown(element: &Element, output: &mut String) {
 				output.push('#');
 			}
 			output.push(' ');
-			convert_element_to_markdown(element, output);
+			convert_children_to_markdown(element, output);
 			output.push_str("\n\n");
 		}
-		"strong" | "b" => {
+		"strong" | "b" | "em" | "i" | "u" | "s" | "strike" | "del" => {
+			// Trim so surrounding whitespace stays outside the markers;
+			// `** bold **` is not recognized as emphasis by Markdown.
 			let mut inner = String::new();
-			convert_element_to_markdown(element, &mut inner);
+			convert_children_to_markdown(element, &mut inner);
 			let trimmed = inner.trim();
 			if !trimmed.is_empty() {
-				output.push_str("**");
+				let marker = match tag.as_str() {
+					"strong" | "b" => "**",
+					"em" | "i" => "*",
+					"u" => "__",
+					_ => "~~",
+				};
+				output.push_str(marker);
 				output.push_str(trimmed);
-				output.push_str("**");
-			}
-		}
-		"em" | "i" => {
-			let mut inner = String::new();
-			convert_element_to_markdown(element, &mut inner);
-			let trimmed = inner.trim();
-			if !trimmed.is_empty() {
-				output.push('*');
-				output.push_str(trimmed);
-				output.push('*');
-			}
-		}
-		"u" => {
-			let mut inner = String::new();
-			convert_element_to_markdown(element, &mut inner);
-			let trimmed = inner.trim();
-			if !trimmed.is_empty() {
-				output.push_str("__");
-				output.push_str(trimmed);
-				output.push_str("__");
-			}
-		}
-		"s" | "strike" | "del" => {
-			let mut inner = String::new();
-			convert_element_to_markdown(element, &mut inner);
-			let trimmed = inner.trim();
-			if !trimmed.is_empty() {
-				output.push_str("~~");
-				output.push_str(trimmed);
-				output.push_str("~~");
+				output.push_str(marker);
 			}
 		}
 		"code" => {
 			output.push('`');
-			convert_element_to_markdown(element, output);
+			convert_children_to_markdown(element, output);
 			output.push('`');
 		}
 		"pre" => {
 			output.push_str("```\n");
-			convert_element_to_markdown(element, output);
+			convert_children_to_markdown(element, output);
 			output.push_str("\n```\n\n");
 		}
 		"img" => {
@@ -356,71 +332,98 @@ fn convert_tag_to_markdown(element: &Element, output: &mut String) {
 		"a" => {
 			if let Some(href) = element.attr("href") {
 				output.push('[');
-				convert_element_to_markdown(element, output);
+				convert_children_to_markdown(element, output);
 				let _ = write!(output, "]({href})");
 			} else {
-				convert_element_to_markdown(element, output);
+				convert_children_to_markdown(element, output);
 			}
 		}
 		"hr" => output.push_str("---\n\n"),
-		"ul" => {
-			for node in element.child_nodes() {
-				if let Ok(li) = Element::try_from(node)
-					&& li.tag_name().as_deref() == Some("li")
-				{
-					output.push_str("- ");
-					convert_element_to_markdown(&li, output);
+		"ul" | "ol" => {
+			for (index, child) in element.children().enumerate() {
+				if child.tag_name().as_deref() == Some("li") {
+					if tag == "ol" {
+						let _ = write!(output, "{}. ", index + 1);
+					} else {
+						output.push_str("- ");
+					}
+					convert_children_to_markdown(&child, output);
 					output.push('\n');
-				}
-			}
-			output.push('\n');
-		}
-		"ol" => {
-			let mut index = 1;
-			for node in element.child_nodes() {
-				if let Ok(li) = Element::try_from(node)
-					&& li.tag_name().as_deref() == Some("li")
-				{
-					let _ = write!(output, "{index}. ");
-					convert_element_to_markdown(&li, output);
-					output.push('\n');
-					index += 1;
 				}
 			}
 			output.push('\n');
 		}
 		"blockquote" => {
-			let mut inner = String::new();
-			convert_element_to_markdown(element, &mut inner);
-			for line in inner.lines() {
-				output.push_str("> ");
-				output.push_str(line);
+			output.push_str("> ");
+			convert_children_to_markdown(element, output);
+			output.push_str("\n\n");
+		}
+		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "span" | "li" => {
+			convert_children_to_markdown(element, output);
+			if !output.ends_with("\n\n") && !output.ends_with('\n') {
 				output.push('\n');
 			}
-			output.push('\n');
 		}
-		"div" | "section" | "article" | "span" | "li" => {
-			convert_element_to_markdown(element, output);
-		}
-		_ => convert_element_to_markdown(element, output),
+		// Unknown tags: recurse so their prose is still emitted.
+		_ => convert_children_to_markdown(element, output),
 	}
 }
 
+/// Block-level tags whose descendants are emitted through their own
+/// conversion rather than by revisiting them from the selector.
+const BLOCK_TAGS: &[&str] = &[
+	"p",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"ul",
+	"ol",
+	"blockquote",
+	"pre",
+	"hr",
+	"img",
+	"div",
+	"section",
+	"article",
+	"header",
+	"footer",
+	"main",
+	"aside",
+	"li",
+];
+
+fn is_block_tag(tag: &str) -> bool {
+	BLOCK_TAGS.contains(&tag)
+}
+
 /// Convert chapter HTML to Aidoku Markdown while excluding ad placements.
+///
+/// The fragment root cannot be traversed directly (its child lists come back
+/// empty), so block-level elements are selected instead. An element whose
+/// parent is itself a handled block is skipped: the ancestor's recursion
+/// already emits it.
 pub fn html_to_markdown(html: &str) -> String {
 	let Ok(doc) = Html::parse_fragment(html) else {
 		return String::new();
 	};
 
-	// Remove ad placements before conversion
-	remove_ad_nodes(&doc);
-
-	// Convert to markdown by traversing all children of the fragment root,
-	// so that lists, blockquotes, and prose in generic containers are
-	// preserved rather than silently dropped.
 	let mut output = String::new();
-	let root = Element::from(doc);
-	convert_element_to_markdown(&root, &mut output);
+	if let Some(elements) =
+		doc.select("h1,h2,h3,h4,h5,h6,p,ul,ol,blockquote,pre,hr,img,div,section,article")
+	{
+		for element in elements {
+			if let Some(parent) = element.parent() {
+				let parent_tag = parent.tag_name().unwrap_or_default();
+				if is_block_tag(&parent_tag) {
+					continue;
+				}
+			}
+			convert_element_to_markdown(&element, &mut output);
+		}
+	}
 	output.trim().to_string()
 }
 
