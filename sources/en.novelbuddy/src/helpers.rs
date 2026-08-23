@@ -368,9 +368,9 @@ pub fn html_to_markdown(html: &str) -> String {
 	};
 
 	let mut output = String::new();
-	if let Some(elements) =
-		doc.select("h1,h2,h3,h4,h5,h6,p,ul,ol,blockquote,pre,hr,img,div,section,article")
-	{
+	// Derived from the same list that drives the parent-skip check below,
+	// so the two can never drift apart.
+	if let Some(elements) = doc.select(BLOCK_TAGS.join(",")) {
 		for element in elements {
 			if let Some(parent) = element.parent() {
 				let parent_tag = parent.tag_name().unwrap_or_default();
