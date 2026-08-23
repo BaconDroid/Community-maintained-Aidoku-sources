@@ -1,7 +1,7 @@
 #![no_std]
 use aidoku::{
 	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, NotificationHandler, Page, PageContent, Result, Source,
+	MangaPageResult, Page, PageContent, Result, Source,
 	alloc::{String, Vec, string::ToString, vec},
 	helpers::uri::QueryParameters,
 	imports::std::send_partial_result,
@@ -44,18 +44,24 @@ impl Source for NovelBuddy {
 	) -> Result<MangaPageResult> {
 		let mut qs = QueryParameters::new();
 		let mut has_sort = false;
+		let mut user_status_set = false;
 		let mut excluded_genres = settings::hidden_genres();
 
 		for filter in filters {
 			match filter {
 				FilterValue::Sort { index, .. } => {
-					if let Some(s) = SORT_IDS.get(index as usize) {
+					// Index 0 is the filter's own default; defer to the
+					// configured settings default sort instead.
+					if index != 0
+						&& let Some(s) = SORT_IDS.get(index as usize)
+					{
 						qs.push("sort", Some(*s));
 						has_sort = true;
 					}
 				}
 				FilterValue::Select { id, value } if id == "status" && value != "all" => {
 					qs.push("status", Some(&value));
+					user_status_set = true;
 				}
 				FilterValue::MultiSelect {
 					id,
@@ -89,7 +95,14 @@ impl Source for NovelBuddy {
 		}
 
 		if !has_sort {
-			qs.push("sort", Some("popular"));
+			let default_sort = settings::default_sort();
+			qs.push("sort", Some(&default_sort));
+		}
+		if !user_status_set {
+			let default_status = settings::default_status();
+			if default_status != "all" {
+				qs.push("status", Some(&default_status));
+			}
 		}
 		if !excluded_genres.is_empty() {
 			qs.push("exclude", Some(&excluded_genres.join(",")));
@@ -220,20 +233,7 @@ impl DeepLinkHandler for NovelBuddy {
 	}
 }
 
-impl NotificationHandler for NovelBuddy {
-	fn handle_notification(&self, notification: String) {
-		if notification == "resetGenreFilter" {
-			settings::reset_hidden_genres();
-		}
-	}
-}
-
-register_source!(
-	NovelBuddy,
-	ListingProvider,
-	DeepLinkHandler,
-	NotificationHandler
-);
+register_source!(NovelBuddy, ListingProvider, DeepLinkHandler);
 
 #[cfg(test)]
 mod tests {
