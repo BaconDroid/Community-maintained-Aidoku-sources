@@ -1,7 +1,11 @@
 use aidoku::{
 	Chapter, ContentRating, Manga, MangaStatus, Result,
 	alloc::{String, Vec, string::ToString},
-	imports::{html::Html, net::Request, std::parse_date},
+	imports::{
+		html::{Element, Html, Kind},
+		net::Request,
+		std::parse_date,
+	},
 	prelude::*,
 };
 use serde::de::DeserializeOwned;
@@ -180,10 +184,9 @@ pub fn parse_id_from_canonical(new_url: &str) -> Option<String> {
 	}
 }
 
-/// Convert NovelBuddy's chapter/description HTML to plain text for
-/// `PageContent::Text`. The API wraps prose in `<p>` paragraphs alongside
-/// empty ad-placement divs; selecting `p` ignores the latter, and the HTML
-/// parser handles entity decoding and nested inline tags.
+/// Convert a description to plain text. Descriptions should not contain
+/// Markdown markers, since they are displayed as metadata rather than as a
+/// `PageContent` body.
 pub fn html_to_text(html: &str) -> String {
 	let Ok(doc) = Html::parse_fragment(html) else {
 		return String::new();
@@ -199,6 +202,96 @@ pub fn html_to_text(html: &str) -> String {
 			.join("\n\n")
 		})
 		.unwrap_or_default()
+}
+
+fn escape_markdown(text: &str, output: &mut String) {
+	for ch in text.chars() {
+		match ch {
+			'\\' | '`' | '*' | '_' | '{' | '}' | '[' | ']' | '<' | '>' | '(' | ')' | '#' | '+'
+			| '-' | '.' | '!' | '|' => {
+				output.push('\\');
+				output.push(ch);
+			}
+			_ => output.push(ch),
+		}
+	}
+}
+
+fn convert_element_to_markdown(element: &Element, output: &mut String) {
+	for node in element.child_nodes() {
+		match node.kind() {
+			Kind::TextNode => {
+				if let Some(text) = node.text() {
+					escape_markdown(&text, output);
+				}
+			}
+			Kind::Element => {
+				if let Ok(element) = Element::try_from(node) {
+					convert_tag_to_markdown(&element, output);
+				}
+			}
+			_ => {}
+		}
+	}
+}
+
+fn convert_tag_to_markdown(element: &Element, output: &mut String) {
+	let tag = element.tag_name().unwrap_or_default();
+	match tag.as_str() {
+		"p" => {
+			convert_element_to_markdown(element, output);
+			output.push_str("\n\n");
+		}
+		"br" => output.push_str("  \n"),
+		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+			let level = tag.as_bytes()[1] - b'0';
+			for _ in 0..level {
+				output.push('#');
+			}
+			output.push(' ');
+			convert_element_to_markdown(element, output);
+			output.push_str("\n\n");
+		}
+		"strong" | "b" => {
+			output.push_str("**");
+			convert_element_to_markdown(element, output);
+			output.push_str("**");
+		}
+		"em" | "i" => {
+			output.push('*');
+			convert_element_to_markdown(element, output);
+			output.push('*');
+		}
+		"u" => {
+			output.push_str("__");
+			convert_element_to_markdown(element, output);
+			output.push_str("__");
+		}
+		"s" | "strike" | "del" => {
+			output.push_str("~~");
+			convert_element_to_markdown(element, output);
+			output.push_str("~~");
+		}
+		// NovelBuddy uses empty placement divs for advertisements. Do not
+		// recurse into divs: prose is exposed as paragraphs/headings, while
+		// this keeps those placements out of the chapter body.
+		"div" => {}
+		_ => convert_element_to_markdown(element, output),
+	}
+}
+
+/// Convert chapter HTML to Aidoku Markdown while excluding ad placements.
+pub fn html_to_markdown(html: &str) -> String {
+	let Ok(doc) = Html::parse_fragment(html) else {
+		return String::new();
+	};
+	let mut output = String::new();
+	if let Some(elements) = doc.select("p, h1, h2, h3, h4, h5, h6") {
+		for element in elements {
+			convert_tag_to_markdown(&element, &mut output);
+		}
+	}
+	output.trim().to_string()
 }
 
 #[cfg(test)]
@@ -222,10 +315,30 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn strips_inner_tags() {
-		let html = "<p>A <em>bold</em> claim</p>";
-		let out = html_to_text(html);
-		assert_eq!(out, "A bold claim");
+	fn preserves_inline_markdown_without_tags() {
+		let html = "<p>A <strong>bold</strong>, <em>italic</em>, <u>underlined</u>, and <del>gone</del>.</p>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "A **bold**, *italic*, __underlined__, and ~~gone~~\\.");
+	}
+
+	#[aidoku_test]
+	fn preserves_breaks_and_headings() {
+		let html = "<h2>Chapter 1</h2><p>First<br>second</p><div class=\"ad-placement\"></div><p>Third</p>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "## Chapter 1\n\nFirst  \nsecond\n\nThird");
+	}
+
+	#[aidoku_test]
+	fn escapes_literal_markdown_and_decodes_entities() {
+		let html = "<p>Tom &amp; Jerry &mdash; use *literal* and _text_</p>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "Tom & Jerry — use \\*literal\\* and \\_text\\_");
+	}
+
+	#[aidoku_test]
+	fn descriptions_remain_plain_text() {
+		let html = "<p>A <strong>bold</strong> description</p>";
+		assert_eq!(html_to_text(html), "A bold description");
 	}
 
 	#[aidoku_test]

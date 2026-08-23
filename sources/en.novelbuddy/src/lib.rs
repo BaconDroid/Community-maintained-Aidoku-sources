@@ -135,7 +135,7 @@ impl Source for NovelBuddy {
 			.chapter
 			.content
 			.as_deref()
-			.map(helpers::html_to_text)
+			.map(helpers::html_to_markdown)
 			.unwrap_or_default();
 		let text = if body.is_empty() {
 			"(empty chapter)".to_string()
@@ -228,7 +228,12 @@ impl NotificationHandler for NovelBuddy {
 	}
 }
 
-register_source!(NovelBuddy, ListingProvider, DeepLinkHandler, NotificationHandler);
+register_source!(
+	NovelBuddy,
+	ListingProvider,
+	DeepLinkHandler,
+	NotificationHandler
+);
 
 #[cfg(test)]
 mod tests {
