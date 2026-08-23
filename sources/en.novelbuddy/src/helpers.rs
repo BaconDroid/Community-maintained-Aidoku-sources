@@ -142,7 +142,17 @@ pub fn absolute_url(path_or_url: &str) -> String {
 }
 
 pub fn parse_iso_date(value: &str) -> Option<i64> {
-	parse_date(value, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+	// The API returns e.g. "2024-01-02T03:04:05.000Z". The repo-proven way
+	// to handle the trailing "Z" is a quoted literal token (asurascans,
+	// ezmanga, kagane); devices parse it as UTC. As a last resort, strip the
+	// zone/milliseconds and parse naively (the test-runner's host treats
+	// naive timestamps as UTC).
+	parse_date(value, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+		.or_else(|| parse_date(value, "yyyy-MM-dd'T'HH:mm:ss'Z'"))
+		.or_else(|| {
+			let naive = value.split('.').next()?;
+			parse_date(naive, "yyyy-MM-ddTHH:mm:ss")
+		})
 }
 
 pub fn parse_chapter_number(name: &str) -> Option<f32> {
