@@ -174,26 +174,6 @@ pub fn parse_id_from_canonical(new_url: &str) -> Option<String> {
 	}
 }
 
-/// Whether a class or id value indicates an ad placement. Matching is scoped
-/// to whole tokens (`ad`, `ads`) and specific substrings (`ad-`, `-ad`,
-/// `sponsor`, `promo`, `placement`, `advert`, `banner`) so ordinary classes
-/// such as `read` or `breadcrumb` are never mistaken for ads.
-fn is_ad_marker(value: &str) -> bool {
-	let value = value.to_ascii_lowercase();
-	for token in value.split(|c: char| c.is_whitespace() || c == '-') {
-		if token == "ad" || token == "ads" {
-			return true;
-		}
-	}
-	value.contains("ad-")
-		|| value.contains("-ad")
-		|| value.contains("sponsor")
-		|| value.contains("promo")
-		|| value.contains("placement")
-		|| value.contains("advert")
-		|| value.contains("banner")
-}
-
 /// Convert a description to plain text. Descriptions should not contain
 /// Markdown markers, since they are displayed as metadata rather than as a
 /// `PageContent` body.
@@ -251,23 +231,7 @@ fn convert_children_to_markdown(element: &Element, output: &mut String) {
 	}
 }
 
-/// Whether this element is an ad placement, based on its class or id.
-///
-/// DOM removal via `Element::remove` proved unreliable on selected elements,
-/// so placements are skipped during conversion instead.
-fn is_ad_placement(element: &Element) -> bool {
-	element
-		.class_name()
-		.as_deref()
-		.map(is_ad_marker)
-		.unwrap_or(false)
-		|| element.id().as_deref().map(is_ad_marker).unwrap_or(false)
-}
-
 fn convert_element_to_markdown(element: &Element, output: &mut String) {
-	if is_ad_placement(element) {
-		return;
-	}
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
 		"p" => {
@@ -388,7 +352,11 @@ fn is_block_tag(tag: &str) -> bool {
 	BLOCK_TAGS.contains(&tag)
 }
 
-/// Convert chapter HTML to Aidoku Markdown while excluding ad placements.
+/// Convert chapter HTML to Aidoku Markdown.
+///
+/// The API's chapter content carries no ad markup (verified on live
+/// chapters): its placement spacers are empty, style-only divs that
+/// naturally emit nothing during conversion.
 ///
 /// The fragment root cannot be traversed directly (its child lists come back
 /// empty), so block-level elements are selected instead. An element whose
@@ -445,7 +413,9 @@ mod tests {
 
 	#[aidoku_test]
 	fn preserves_breaks_and_headings() {
-		let html = "<h2>Chapter 1</h2><p>First<br>second</p><div class=\"ad-placement\"></div><p>Third</p>";
+		let html = "<h2>Chapter 1</h2><p>First<br>second</p>\
+			<div style=\"margin:0;padding:0;border:0;font-size:0;line-height:0\"></div>\
+			<p>Third</p>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "## Chapter 1\n\nFirst  \nsecond\n\nThird");
 	}
@@ -499,8 +469,11 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn excludes_ad_placements() {
-		let html = "<div class=\"ad-placement\"><p>Sponsored text</p></div><p>Real content</p>";
+	fn ignores_empty_placement_divs() {
+		// Real API content (verified on a live chapter): ad spacers are
+		// empty, style-only divs without any class or id.
+		let html = "<div style=\"margin:0;padding:0;border:0;font-size:0;line-height:0\"></div>\
+			<div> </div><p>Real content</p>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "Real content");
 	}
