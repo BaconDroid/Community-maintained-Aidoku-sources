@@ -366,6 +366,9 @@ fn is_block_tag(tag: &str) -> bool {
 
 /// Convert chapter HTML to Aidoku Markdown.
 ///
+/// Approach adapted from en.freewebnovel's chapter converter and the shared
+/// libgroup template converter.
+///
 /// The API's chapter content carries no ad markup (verified on live
 /// chapters): its placement spacers are empty, style-only divs that
 /// naturally emit nothing during conversion.
