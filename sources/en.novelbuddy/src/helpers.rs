@@ -311,12 +311,15 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 			convert_children_to_markdown(element, output);
 			output.push_str("\n\n");
 		}
-		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "span" | "li" => {
+		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" => {
 			convert_children_to_markdown(element, output);
 			if !output.ends_with("\n\n") && !output.ends_with('\n') {
 				output.push('\n');
 			}
 		}
+		// Inline containers carry no block semantics: pass their content
+		// through without injecting newlines mid-paragraph.
+		"span" | "li" => convert_children_to_markdown(element, output),
 		// Unknown tags: recurse so their prose is still emitted.
 		_ => convert_children_to_markdown(element, output),
 	}
@@ -483,6 +486,13 @@ mod tests {
 		let html = "<div>text in div</div>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "text in div");
+	}
+
+	#[aidoku_test]
+	fn keeps_inline_span_in_paragraph() {
+		let html = "<p>Hello <span>world</span> end</p>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "Hello world end");
 	}
 
 	#[aidoku_test]
