@@ -216,6 +216,14 @@ fn escape_markdown(text: &str, output: &mut String) {
 	}
 }
 
+/// Append an element's full descendant text without Markdown escaping:
+/// backslashes inside code spans and fenced blocks are literal output.
+fn append_raw_text(element: &Element, output: &mut String) {
+	if let Some(text) = element.text() {
+		output.push_str(&text);
+	}
+}
+
 /// Append an element's direct text and child elements in document order.
 ///
 /// `child_nodes` yields text nodes (whose text is only reachable there),
@@ -277,12 +285,12 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		}
 		"code" => {
 			output.push('`');
-			convert_children_to_markdown(element, output);
+			append_raw_text(element, output);
 			output.push('`');
 		}
 		"pre" => {
 			output.push_str("```\n");
-			convert_children_to_markdown(element, output);
+			append_raw_text(element, output);
 			output.push_str("\n```\n\n");
 		}
 		"img" => {
@@ -496,6 +504,14 @@ mod tests {
 		let html = "<p><strong> bold </strong> and <em> italic </em></p>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "**bold** and *italic*");
+	}
+
+	#[aidoku_test]
+	fn keeps_code_content_unescaped() {
+		let html = "<p>use <code>a_b-c *x*</code></p><pre>let s = \"a_b\";</pre>";
+		let out = html_to_markdown(html);
+		assert!(out.contains("`a_b-c *x*`"), "code span: {out}");
+		assert!(out.contains("let s = \"a_b\";"), "fenced block: {out}");
 	}
 
 	#[aidoku_test]
