@@ -12,7 +12,7 @@ mod helpers;
 mod models;
 mod settings;
 
-use helpers::{fetch_chapter_list, request, resolve_slug};
+use helpers::{fetch_chapter_list, html_to_markdown, request, resolve_slug};
 use models::{ChapterDetailData, ListData, TitleDetailData, TrendingData};
 
 pub const BASE_URL: &str = "https://novelbuddy.me";
@@ -135,7 +135,7 @@ impl Source for NovelBuddy {
 			.chapter
 			.content
 			.as_deref()
-			.map(helpers::html_to_markdown)
+			.map(html_to_markdown)
 			.unwrap_or_default();
 		let text = if body.is_empty() {
 			"(empty chapter)".to_string()
