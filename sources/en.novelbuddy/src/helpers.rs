@@ -334,36 +334,6 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 	}
 }
 
-/// Block-level tags whose descendants are emitted through their own
-/// conversion rather than by revisiting them from the selector.
-const BLOCK_TAGS: &[&str] = &[
-	"p",
-	"h1",
-	"h2",
-	"h3",
-	"h4",
-	"h5",
-	"h6",
-	"ul",
-	"ol",
-	"blockquote",
-	"pre",
-	"hr",
-	"img",
-	"div",
-	"section",
-	"article",
-	"header",
-	"footer",
-	"main",
-	"aside",
-	"li",
-];
-
-fn is_block_tag(tag: &str) -> bool {
-	BLOCK_TAGS.contains(&tag)
-}
-
 /// Convert chapter HTML to Aidoku Markdown.
 ///
 /// Approach adapted from en.freewebnovel's chapter converter and the shared
@@ -373,28 +343,21 @@ fn is_block_tag(tag: &str) -> bool {
 /// chapters): its placement spacers are empty, style-only divs that
 /// naturally emit nothing during conversion.
 ///
-/// The fragment root cannot be traversed directly (its child lists come back
-/// empty), so block-level elements are selected instead. An element whose
-/// parent is itself a handled block is skipped: the ancestor's recursion
-/// already emits it.
+/// The fragment is wrapped in a container element before parsing: the
+/// fragment root itself cannot be traversed (its child lists come back
+/// empty), while a selected wrapper element supports the full traversal
+/// API, including root-level text and inline elements.
 pub fn html_to_markdown(html: &str) -> String {
-	let Ok(doc) = Html::parse_fragment(html) else {
+	// Concatenated rather than formatted: chapter content may contain
+	// braces, which format! would treat as placeholders.
+	let wrapped = ["<div id=\"nb-root\">", html, "</div>"].concat();
+	let Ok(doc) = Html::parse_fragment(wrapped) else {
 		return String::new();
 	};
 
 	let mut output = String::new();
-	// Derived from the same list that drives the parent-skip check below,
-	// so the two can never drift apart.
-	if let Some(elements) = doc.select(BLOCK_TAGS.join(",")) {
-		for element in elements {
-			if let Some(parent) = element.parent() {
-				let parent_tag = parent.tag_name().unwrap_or_default();
-				if is_block_tag(&parent_tag) {
-					continue;
-				}
-			}
-			convert_element_to_markdown(&element, &mut output);
-		}
+	if let Some(root) = doc.select_first("#nb-root") {
+		convert_children_to_markdown(&root, &mut output);
 	}
 	output.trim().to_string()
 }
@@ -498,6 +461,13 @@ mod tests {
 		let html = "<div>text in div</div>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "text in div");
+	}
+
+	#[aidoku_test]
+	fn keeps_root_level_text_and_inline_elements() {
+		let html = "Line one <b>bold</b> line two";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "Line one **bold** line two");
 	}
 
 	#[aidoku_test]
