@@ -1,7 +1,7 @@
 #![no_std]
 use aidoku::{
 	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, PageContent, Result, Source,
+	MangaPageResult, NotificationHandler, Page, PageContent, Result, Source,
 	alloc::{String, Vec, string::ToString, vec},
 	helpers::uri::QueryParameters,
 	imports::std::send_partial_result,
@@ -233,7 +233,20 @@ impl DeepLinkHandler for NovelBuddy {
 	}
 }
 
-register_source!(NovelBuddy, ListingProvider, DeepLinkHandler);
+impl NotificationHandler for NovelBuddy {
+	fn handle_notification(&self, notification: String) {
+		if notification == "resetGenreFilter" {
+			settings::reset_hidden_genres();
+		}
+	}
+}
+
+register_source!(
+	NovelBuddy,
+	ListingProvider,
+	DeepLinkHandler,
+	NotificationHandler
+);
 
 #[cfg(test)]
 mod tests {

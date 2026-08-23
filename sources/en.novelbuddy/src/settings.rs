@@ -1,6 +1,6 @@
 use aidoku::{
 	alloc::{String, Vec},
-	imports::defaults::defaults_get,
+	imports::defaults::{DefaultValue, defaults_get, defaults_set},
 };
 
 const HIDDEN_GENRES_KEY: &str = "hiddenGenres";
@@ -9,6 +9,10 @@ const DEFAULT_STATUS_KEY: &str = "defaultStatus";
 
 pub fn hidden_genres() -> Vec<String> {
 	defaults_get::<Vec<String>>(HIDDEN_GENRES_KEY).unwrap_or_default()
+}
+
+pub fn reset_hidden_genres() {
+	defaults_set(HIDDEN_GENRES_KEY, DefaultValue::Null);
 }
 
 /// Default sort order used when the search sort filter is left at its own
