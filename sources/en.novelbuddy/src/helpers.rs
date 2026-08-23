@@ -8,6 +8,7 @@ use aidoku::{
 	},
 	prelude::*,
 };
+use core::fmt::Write as _;
 use serde::de::DeserializeOwned;
 
 use crate::models::{
@@ -184,6 +185,32 @@ pub fn parse_id_from_canonical(new_url: &str) -> Option<String> {
 	}
 }
 
+/// Remove elements whose class or id contains ad-related keywords
+/// (case-insensitive). This must run before conversion so that ad placements
+/// do not leak into the chapter body.
+fn remove_ad_nodes(doc: &aidoku::imports::html::Document) {
+	let ad_keywords = ["ad", "sponsor", "promo", "placement"];
+	let mut to_remove = Vec::new();
+
+	if let Some(elements) = doc.select("*") {
+		for element in elements {
+			let matches = element
+				.class_name()
+				.map(|c| c.to_ascii_lowercase())
+				.into_iter()
+				.chain(element.id().map(|id| id.to_ascii_lowercase()))
+				.any(|val| ad_keywords.iter().any(|kw| val.contains(kw)));
+			if matches {
+				to_remove.push(element);
+			}
+		}
+	}
+
+	for el in to_remove {
+		el.remove();
+	}
+}
+
 /// Convert a description to plain text. Descriptions should not contain
 /// Markdown markers, since they are displayed as metadata rather than as a
 /// `PageContent` body.
@@ -207,8 +234,8 @@ pub fn html_to_text(html: &str) -> String {
 fn escape_markdown(text: &str, output: &mut String) {
 	for ch in text.chars() {
 		match ch {
-			'\\' | '`' | '*' | '_' | '{' | '}' | '[' | ']' | '<' | '>' | '(' | ')' | '#' | '+'
-			| '-' | '.' | '!' | '|' => {
+			'\\' | '`' | '*' | '_' | '~' | '{' | '}' | '[' | ']' | '<' | '>' | '(' | ')' | '#'
+			| '+' | '-' | '.' | '!' | '|' => {
 				output.push('\\');
 				output.push(ch);
 			}
@@ -253,29 +280,84 @@ fn convert_tag_to_markdown(element: &Element, output: &mut String) {
 			output.push_str("\n\n");
 		}
 		"strong" | "b" => {
-			output.push_str("**");
-			convert_element_to_markdown(element, output);
-			output.push_str("**");
+			let mut inner = String::new();
+			convert_element_to_markdown(element, &mut inner);
+			let trimmed = inner.trim();
+			if !trimmed.is_empty() {
+				output.push_str("**");
+				output.push_str(trimmed);
+				output.push_str("**");
+			}
 		}
 		"em" | "i" => {
-			output.push('*');
-			convert_element_to_markdown(element, output);
-			output.push('*');
+			let mut inner = String::new();
+			convert_element_to_markdown(element, &mut inner);
+			let trimmed = inner.trim();
+			if !trimmed.is_empty() {
+				output.push('*');
+				output.push_str(trimmed);
+				output.push('*');
+			}
 		}
 		"u" => {
-			output.push_str("__");
-			convert_element_to_markdown(element, output);
-			output.push_str("__");
+			let mut inner = String::new();
+			convert_element_to_markdown(element, &mut inner);
+			let trimmed = inner.trim();
+			if !trimmed.is_empty() {
+				output.push_str("__");
+				output.push_str(trimmed);
+				output.push_str("__");
+			}
 		}
 		"s" | "strike" | "del" => {
-			output.push_str("~~");
-			convert_element_to_markdown(element, output);
-			output.push_str("~~");
+			let mut inner = String::new();
+			convert_element_to_markdown(element, &mut inner);
+			let trimmed = inner.trim();
+			if !trimmed.is_empty() {
+				output.push_str("~~");
+				output.push_str(trimmed);
+				output.push_str("~~");
+			}
 		}
-		// NovelBuddy uses empty placement divs for advertisements. Do not
-		// recurse into divs: prose is exposed as paragraphs/headings, while
-		// this keeps those placements out of the chapter body.
-		"div" => {}
+		"ul" => {
+			for node in element.child_nodes() {
+				if let Ok(li) = Element::try_from(node)
+					&& li.tag_name().as_deref() == Some("li")
+				{
+					output.push_str("- ");
+					convert_element_to_markdown(&li, output);
+					output.push('\n');
+				}
+			}
+			output.push('\n');
+		}
+		"ol" => {
+			let mut index = 1;
+			for node in element.child_nodes() {
+				if let Ok(li) = Element::try_from(node)
+					&& li.tag_name().as_deref() == Some("li")
+				{
+					let _ = write!(output, "{index}. ");
+					convert_element_to_markdown(&li, output);
+					output.push('\n');
+					index += 1;
+				}
+			}
+			output.push('\n');
+		}
+		"blockquote" => {
+			let mut inner = String::new();
+			convert_element_to_markdown(element, &mut inner);
+			for line in inner.lines() {
+				output.push_str("> ");
+				output.push_str(line);
+				output.push('\n');
+			}
+			output.push('\n');
+		}
+		"div" | "section" | "article" | "span" | "li" => {
+			convert_element_to_markdown(element, output);
+		}
 		_ => convert_element_to_markdown(element, output),
 	}
 }
@@ -285,12 +367,16 @@ pub fn html_to_markdown(html: &str) -> String {
 	let Ok(doc) = Html::parse_fragment(html) else {
 		return String::new();
 	};
+
+	// Remove ad placements before conversion
+	remove_ad_nodes(&doc);
+
+	// Convert to markdown by traversing all children of the fragment root,
+	// so that lists, blockquotes, and prose in generic containers are
+	// preserved rather than silently dropped.
 	let mut output = String::new();
-	if let Some(elements) = doc.select("p, h1, h2, h3, h4, h5, h6") {
-		for element in elements {
-			convert_tag_to_markdown(&element, &mut output);
-		}
-	}
+	let root = Element::from(doc);
+	convert_element_to_markdown(&root, &mut output);
 	output.trim().to_string()
 }
 
@@ -330,9 +416,12 @@ mod tests {
 
 	#[aidoku_test]
 	fn escapes_literal_markdown_and_decodes_entities() {
-		let html = "<p>Tom &amp; Jerry &mdash; use *literal* and _text_</p>";
+		let html = "<p>Tom &amp; Jerry &mdash; use *literal*, _text_, and ~~this~~</p>";
 		let out = html_to_markdown(html);
-		assert_eq!(out, "Tom & Jerry — use \\*literal\\* and \\_text\\_");
+		assert_eq!(
+			out,
+			"Tom & Jerry — use \\*literal\\*, \\_text\\_, and \\~\\~this\\~\\~"
+		);
 	}
 
 	#[aidoku_test]
@@ -367,9 +456,44 @@ mod tests {
 			Some(2234.0)
 		);
 		assert_eq!(
-			parse_chapter_number("Chapter ’2362 Hunter and Prey"),
+			parse_chapter_number("Chapter '2362 Hunter and Prey"),
 			Some(2362.0)
 		);
 		assert_eq!(parse_chapter_number("Chapter One"), None);
+	}
+
+	#[aidoku_test]
+	fn excludes_ad_placements() {
+		let html = "<div class=\"ad-placement\"><p>Sponsored text</p></div><p>Real content</p>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "Real content");
+	}
+
+	#[aidoku_test]
+	fn renders_text_in_div() {
+		let html = "<div>text in div</div>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "text in div");
+	}
+
+	#[aidoku_test]
+	fn renders_unordered_list() {
+		let html = "<ul><li>a</li><li>b</li></ul>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "- a\n- b");
+	}
+
+	#[aidoku_test]
+	fn renders_blockquote() {
+		let html = "<blockquote>cite</blockquote>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "> cite");
+	}
+
+	#[aidoku_test]
+	fn trims_inline_whitespace() {
+		let html = "<p><strong> bold </strong> and <em> italic </em></p>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "**bold** and *italic*");
 	}
 }
