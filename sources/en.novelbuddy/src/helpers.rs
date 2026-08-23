@@ -337,6 +337,32 @@ fn convert_tag_to_markdown(element: &Element, output: &mut String) {
 				output.push_str("~~");
 			}
 		}
+		"code" => {
+			output.push('`');
+			convert_element_to_markdown(element, output);
+			output.push('`');
+		}
+		"pre" => {
+			output.push_str("```\n");
+			convert_element_to_markdown(element, output);
+			output.push_str("\n```\n\n");
+		}
+		"img" => {
+			if let Some(src) = element.attr("src") {
+				let alt = element.attr("alt").unwrap_or_default();
+				let _ = write!(output, "![{alt}]({src})\n\n");
+			}
+		}
+		"a" => {
+			if let Some(href) = element.attr("href") {
+				output.push('[');
+				convert_element_to_markdown(element, output);
+				let _ = write!(output, "]({href})");
+			} else {
+				convert_element_to_markdown(element, output);
+			}
+		}
+		"hr" => output.push_str("---\n\n"),
 		"ul" => {
 			for node in element.child_nodes() {
 				if let Ok(li) = Element::try_from(node)
@@ -513,5 +539,22 @@ mod tests {
 		let html = "<p><strong> bold </strong> and <em> italic </em></p>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "**bold** and *italic*");
+	}
+
+	#[aidoku_test]
+	fn renders_code_pre_links_images_and_rules() {
+		let html = "<p>Use <code>aidoku</code></p><hr>\
+			<pre>let x = 1;</pre>\
+			<p><a href=\"https://example.com\">site</a></p>\
+			<img src=\"https://example.com/i.png\" alt=\"pic\">";
+		let out = html_to_markdown(html);
+		assert!(out.contains("`aidoku`"), "inline code: {out}");
+		assert!(out.contains("---"), "horizontal rule: {out}");
+		assert!(out.contains("```\nlet x = 1;\n```"), "pre block: {out}");
+		assert!(out.contains("[site](https://example.com)"), "link: {out}");
+		assert!(
+			out.contains("![pic](https://example.com/i.png)"),
+			"image: {out}"
+		);
 	}
 }
