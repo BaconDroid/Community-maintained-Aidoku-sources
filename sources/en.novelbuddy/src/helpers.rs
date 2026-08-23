@@ -185,21 +185,39 @@ pub fn parse_id_from_canonical(new_url: &str) -> Option<String> {
 	}
 }
 
-/// Remove elements whose class or id contains ad-related keywords
-/// (case-insensitive). This must run before conversion so that ad placements
-/// do not leak into the chapter body.
+/// Whether a class or id value indicates an ad placement. Matching is scoped
+/// to whole tokens (`ad`, `ads`) and specific substrings (`ad-`, `-ad`,
+/// `sponsor`, `promo`, `placement`, `advert`, `banner`) so ordinary classes
+/// such as `read` or `breadcrumb` are never mistaken for ads.
+fn is_ad_marker(value: &str) -> bool {
+	let value = value.to_ascii_lowercase();
+	for token in value.split(|c: char| c.is_whitespace() || c == '-') {
+		if token == "ad" || token == "ads" {
+			return true;
+		}
+	}
+	value.contains("ad-")
+		|| value.contains("-ad")
+		|| value.contains("sponsor")
+		|| value.contains("promo")
+		|| value.contains("placement")
+		|| value.contains("advert")
+		|| value.contains("banner")
+}
+
+/// Remove ad-placement elements before conversion so they do not leak into
+/// the chapter body.
 fn remove_ad_nodes(doc: &aidoku::imports::html::Document) {
-	let ad_keywords = ["ad", "sponsor", "promo", "placement"];
 	let mut to_remove = Vec::new();
 
 	if let Some(elements) = doc.select("*") {
 		for element in elements {
 			let matches = element
 				.class_name()
-				.map(|c| c.to_ascii_lowercase())
-				.into_iter()
-				.chain(element.id().map(|id| id.to_ascii_lowercase()))
-				.any(|val| ad_keywords.iter().any(|kw| val.contains(kw)));
+				.as_deref()
+				.map(is_ad_marker)
+				.unwrap_or(false)
+				|| element.id().as_deref().map(is_ad_marker).unwrap_or(false);
 			if matches {
 				to_remove.push(element);
 			}
