@@ -116,42 +116,5 @@
 			}
 		],
 		"footer": "Novels tagged with the selected genres are excluded from search results."
-	},
-	{
-		"type": "group",
-		"title": "Search Defaults",
-		"items": [
-			{
-				"type": "select",
-				"key": "defaultSort",
-				"title": "Default Sort",
-				"options": [
-					"Popular",
-					"Latest Updates",
-					"Newest",
-					"Rating",
-					"Views",
-					"Bookmarks"
-				],
-				"values": [
-					"popular",
-					"latest",
-					"newest",
-					"rating",
-					"views",
-					"bookmarks"
-				],
-				"default": "popular"
-			},
-			{
-				"type": "select",
-				"key": "defaultStatus",
-				"title": "Default Status",
-				"options": ["All", "Ongoing", "Completed"],
-				"values": ["all", "ongoing", "completed"],
-				"default": "all"
-			}
-		],
-		"footer": "Used as the default when a search filter is left at its own default."
 	}
 ]
