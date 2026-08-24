@@ -158,7 +158,7 @@ pub fn parse_chapter_number(name: &str) -> Option<f32> {
 	// Chapter-name formats vary across titles ("Chapter 5", "Chapter: 5",
 	// "Chapter ’5", "Chapter 12.5"), but the number is always the first numeric
 	// run. Keep a single '.' for decimal (bonus) chapters.
-	let mut num = String::new();
+	let mut num = String::default();
 	let mut seen_dot = false;
 	for ch in name.chars() {
 		if ch.is_ascii_digit() {
@@ -188,7 +188,7 @@ pub fn parse_id_from_canonical(new_url: &str) -> Option<String> {
 /// `PageContent` body.
 pub fn html_to_text(html: &str) -> String {
 	let Ok(doc) = Html::parse_fragment(html) else {
-		return String::new();
+		return String::default();
 	};
 	doc.select("p")
 		.map(|els| {
@@ -268,7 +268,7 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		"strong" | "b" | "em" | "i" | "u" | "s" | "strike" | "del" => {
 			// Trim so surrounding whitespace stays outside the markers;
 			// `** bold **` is not recognized as emphasis by Markdown.
-			let mut inner = String::new();
+			let mut inner = String::default();
 			convert_children_to_markdown(element, &mut inner);
 			let trimmed = inner.trim();
 			if !trimmed.is_empty() {
@@ -349,7 +349,7 @@ fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
 /// Render a blockquote by prefixing every emitted line with `> `, keeping
 /// multi-block quotes valid Markdown.
 fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
-	let mut quoted = String::new();
+	let mut quoted = String::default();
 	convert_children_to_markdown(element, &mut quoted);
 	for (index, line) in quoted.trim_end().lines().enumerate() {
 		if index > 0 {
@@ -379,10 +379,10 @@ pub fn html_to_markdown(html: &str) -> String {
 	// braces, which format! would treat as placeholders.
 	let wrapped = ["<div id=\"nb-root\">", html, "</div>"].concat();
 	let Ok(doc) = Html::parse_fragment(wrapped) else {
-		return String::new();
+		return String::default();
 	};
 
-	let mut output = String::new();
+	let mut output = String::default();
 	if let Some(root) = doc.select_first("#nb-root") {
 		convert_children_to_markdown(&root, &mut output);
 	}
