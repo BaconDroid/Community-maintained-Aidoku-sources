@@ -309,34 +309,8 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 			}
 		}
 		"hr" => output.push_str("---\n\n"),
-		"ul" | "ol" => {
-			let items: Vec<_> = element
-				.children()
-				.filter(|child| child.tag_name().as_deref() == Some("li"))
-				.collect();
-			for (index, item) in items.iter().enumerate() {
-				if tag == "ol" {
-					let _ = write!(output, "{}. ", index + 1);
-				} else {
-					output.push_str("- ");
-				}
-				convert_children_to_markdown(item, output);
-				output.push('\n');
-			}
-			output.push('\n');
-		}
-		"blockquote" => {
-			let mut quoted = String::new();
-			convert_children_to_markdown(element, &mut quoted);
-			for (index, line) in quoted.trim_end().lines().enumerate() {
-				if index > 0 {
-					output.push('\n');
-				}
-				output.push_str("> ");
-				output.push_str(line);
-			}
-			output.push_str("\n\n");
-		}
+		"ul" | "ol" => convert_list_to_markdown(element, &tag, output),
+		"blockquote" => convert_blockquote_to_markdown(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" => {
 			convert_children_to_markdown(element, output);
 			if !output.ends_with("\n\n") && !output.ends_with('\n') {
@@ -349,6 +323,42 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		// Unknown tags: recurse so their prose is still emitted.
 		_ => convert_children_to_markdown(element, output),
 	}
+}
+
+/// Render list items as Markdown bullets or numbered entries.
+///
+/// Numbering follows `li` position: non-item children are filtered out
+/// before enumeration so stray markup cannot shift the sequence.
+fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
+	let items: Vec<_> = element
+		.children()
+		.filter(|child| child.tag_name().as_deref() == Some("li"))
+		.collect();
+	for (index, item) in items.iter().enumerate() {
+		if tag == "ol" {
+			let _ = write!(output, "{}. ", index + 1);
+		} else {
+			output.push_str("- ");
+		}
+		convert_children_to_markdown(item, output);
+		output.push('\n');
+	}
+	output.push('\n');
+}
+
+/// Render a blockquote by prefixing every emitted line with `> `, keeping
+/// multi-block quotes valid Markdown.
+fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
+	let mut quoted = String::new();
+	convert_children_to_markdown(element, &mut quoted);
+	for (index, line) in quoted.trim_end().lines().enumerate() {
+		if index > 0 {
+			output.push('\n');
+		}
+		output.push_str("> ");
+		output.push_str(line);
+	}
+	output.push_str("\n\n");
 }
 
 /// Convert chapter HTML to Aidoku Markdown.
