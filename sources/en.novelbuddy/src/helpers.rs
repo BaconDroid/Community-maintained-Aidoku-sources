@@ -310,22 +310,31 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		}
 		"hr" => output.push_str("---\n\n"),
 		"ul" | "ol" => {
-			for (index, child) in element.children().enumerate() {
-				if child.tag_name().as_deref() == Some("li") {
-					if tag == "ol" {
-						let _ = write!(output, "{}. ", index + 1);
-					} else {
-						output.push_str("- ");
-					}
-					convert_children_to_markdown(&child, output);
-					output.push('\n');
+			let items: Vec<_> = element
+				.children()
+				.filter(|child| child.tag_name().as_deref() == Some("li"))
+				.collect();
+			for (index, item) in items.iter().enumerate() {
+				if tag == "ol" {
+					let _ = write!(output, "{}. ", index + 1);
+				} else {
+					output.push_str("- ");
 				}
+				convert_children_to_markdown(item, output);
+				output.push('\n');
 			}
 			output.push('\n');
 		}
 		"blockquote" => {
-			output.push_str("> ");
-			convert_children_to_markdown(element, output);
+			let mut quoted = String::new();
+			convert_children_to_markdown(element, &mut quoted);
+			for (index, line) in quoted.trim_end().lines().enumerate() {
+				if index > 0 {
+					output.push('\n');
+				}
+				output.push_str("> ");
+				output.push_str(line);
+			}
 			output.push_str("\n\n");
 		}
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" => {
@@ -497,6 +506,20 @@ mod tests {
 		let html = "<blockquote>cite</blockquote>";
 		let out = html_to_markdown(html);
 		assert_eq!(out, "> cite");
+	}
+
+	#[aidoku_test]
+	fn numbers_ordered_list_items_by_li_position() {
+		let html = "<ol><li>a</li><p>note</p><li>b</li></ol>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "1. a\n2. b");
+	}
+
+	#[aidoku_test]
+	fn prefixes_every_blockquote_line() {
+		let html = "<blockquote><p>one</p><p>two</p></blockquote>";
+		let out = html_to_markdown(html);
+		assert_eq!(out, "> one\n> \n> two");
 	}
 
 	#[aidoku_test]
