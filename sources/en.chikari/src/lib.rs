@@ -1,15 +1,17 @@
 #![no_std]
 use aidoku::{
 	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, PageContent, Result, Source,
+	MangaPageResult, NotificationHandler, Page, PageContent, Result, Source,
 	alloc::{String, Vec, vec},
 	imports::std::send_partial_result,
 	prelude::*,
 };
 mod helpers;
 mod models;
+mod settings;
 use helpers::{
-	body_to_text, fetch_chapters, has_next, list_url, manga_from_detail, manga_from_list, request,
+	body_to_markdown, fetch_chapters, has_next, list_url, manga_from_detail, manga_from_list,
+	request, with_hidden_genres,
 };
 use models::{ChapterBody, ListResponse};
 pub const BASE_URL: &str = "https://chikari.moe";
@@ -54,6 +56,7 @@ impl Source for Chikari {
 		page: i32,
 		filters: Vec<FilterValue>,
 	) -> Result<MangaPageResult> {
+		let filters = with_hidden_genres(filters);
 		let limit = 36u32;
 		let offset = (page.max(1) as u32 - 1) * limit;
 		let sort = filters
@@ -107,7 +110,7 @@ impl Source for Chikari {
 			manga.key, chapter.key
 		))?;
 		Ok(vec![Page {
-			content: PageContent::text(body_to_text(data.body)?),
+			content: PageContent::text(body_to_markdown(data.body)?),
 			..Default::default()
 		}])
 	}
@@ -203,7 +206,19 @@ fn valid_number(value: &str) -> bool {
 		Err(_) => false,
 	}
 }
-register_source!(Chikari, ListingProvider, DeepLinkHandler);
+impl NotificationHandler for Chikari {
+	fn handle_notification(&self, notification: String) {
+		if notification == "resetGenreFilter" {
+			settings::reset_hidden_genres();
+		}
+	}
+}
+register_source!(
+	Chikari,
+	ListingProvider,
+	DeepLinkHandler,
+	NotificationHandler
+);
 
 #[cfg(test)]
 mod tests {

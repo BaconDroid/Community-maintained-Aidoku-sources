@@ -1,8 +1,10 @@
 use crate::models::{ChapterItem, ChapterListResponse, NovelDetail, NovelListItem};
+use crate::settings;
 use crate::{BASE_URL, USER_AGENT};
 use aidoku::{
 	Chapter, ContentRating, FilterValue, Manga, MangaStatus, Result,
 	alloc::{String, Vec, string::ToString},
+	helpers::string::PlainText,
 	helpers::uri::QueryParameters,
 	imports::{net::Request, std::parse_date},
 	prelude::*,
@@ -200,15 +202,29 @@ pub fn fetch_chapters(slug: &str) -> Result<Vec<Chapter>> {
 	result.reverse();
 	Ok(result)
 }
+pub fn with_hidden_genres(mut filters: Vec<FilterValue>) -> Vec<FilterValue> {
+	let hidden = settings::hidden_genres();
+	if hidden.is_empty() {
+		return filters;
+	}
+	filters.push(FilterValue::MultiSelect {
+		id: "genres".into(),
+		included: Vec::new(),
+		excluded: hidden,
+	});
+	filters
+}
+
 pub fn parse_iso_date(value: &str) -> Option<i64> {
 	parse_date(value.get(..19)?, "yyyy-MM-ddTHH:mm:ss")
 		.or_else(|| parse_date(value.get(..10)?, "yyyy-MM-dd"))
 }
-pub fn body_to_text(body: String) -> Result<String> {
+pub fn body_to_markdown(body: String) -> Result<String> {
 	let text = body
 		.lines()
 		.map(str::trim)
 		.filter(|line| !line.is_empty())
+		.map(|line| line.escape_markdown())
 		.collect::<Vec<_>>()
 		.join("\n\n");
 	if text.is_empty() {
@@ -260,5 +276,36 @@ mod tests {
 		assert!(url.contains("genre=fantasy"));
 		assert!(url.contains("genre_exclude=mature"));
 		assert!(url.contains("genre_exclude=yuri"));
+	}
+
+	#[aidoku_test]
+	fn body_to_markdown_escapes_bold_and_italic() {
+		let input = "He said *bold* and _italic_ words.".into();
+		let result = body_to_markdown(input).expect("unexpected error");
+		assert!(
+			result.contains("\\*bold\\*"),
+			"expected escaped bold: {result}"
+		);
+		assert!(
+			result.contains("\\_italic\\_"),
+			"expected escaped italic: {result}"
+		);
+	}
+
+	#[aidoku_test]
+	fn body_to_markdown_preserves_paragraph_separation() {
+		let input = "First paragraph.\n\nSecond paragraph.".into();
+		let result = body_to_markdown(input).expect("unexpected error");
+		assert!(
+			result.contains("First paragraph\\.\n\nSecond paragraph\\."),
+			"expected double newline between paragraphs: {result}"
+		);
+	}
+
+	#[aidoku_test]
+	fn body_to_markdown_errors_on_empty() {
+		let input = "\n\n   \n".into();
+		let err = body_to_markdown(input);
+		assert!(err.is_err(), "expected error for empty body");
 	}
 }
