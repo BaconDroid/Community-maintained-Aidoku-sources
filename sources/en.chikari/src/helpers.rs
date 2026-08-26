@@ -60,7 +60,7 @@ pub fn has_next(len: usize, total: u32, offset: u32, limit: u32) -> bool {
 
 pub fn manga_from_list(item: NovelListItem) -> Manga {
 	let slug = item.slug;
-	let url = Some(format!("{BASE_URL}/novels/{slug}"));
+	let url = Some(format!("{BASE_URL}/series/{slug}"));
 	Manga {
 		key: slug,
 		title: item.title,
@@ -82,7 +82,7 @@ pub fn manga_from_list(item: NovelListItem) -> Manga {
 
 pub fn manga_from_detail(detail: NovelDetail) -> Manga {
 	let slug = detail.slug;
-	let url = Some(format!("{BASE_URL}/novels/{slug}"));
+	let url = Some(format!("{BASE_URL}/series/{slug}"));
 	let content_rating = content_rating(detail.is_nsfw, &detail.genres, &detail.tags);
 	let mut tags = Vec::new();
 	for name in detail.genres.into_iter().map(|g| g.name).chain(

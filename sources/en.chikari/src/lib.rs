@@ -128,13 +128,16 @@ impl DeepLinkHandler for Chikari {
 			return Ok(None);
 		};
 		let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
-		if parts.len() == 2 && parts[0] == "novels" && valid_slug(parts[1]) {
+		if parts.len() == 2
+			&& (parts[0] == "novels" || parts[0] == "series")
+			&& valid_slug(parts[1])
+		{
 			return Ok(Some(DeepLinkResult::Manga {
 				key: parts[1].into(),
 			}));
 		}
 		if parts.len() == 3
-			&& parts[0] == "novels"
+			&& (parts[0] == "novels" || parts[0] == "series")
 			&& valid_slug(parts[1])
 			&& valid_number(parts[2])
 		{
@@ -271,10 +274,22 @@ mod tests {
 			matches!(Chikari.handle_deep_link("https://chikari.moe/novels/shadow-slave".into()).unwrap(), Some(DeepLinkResult::Manga { key }) if key == "shadow-slave")
 		);
 		assert!(
+			matches!(Chikari.handle_deep_link("https://chikari.moe/series/shadow-slave".into()).unwrap(), Some(DeepLinkResult::Manga { key }) if key == "shadow-slave")
+		);
+		assert!(
 			matches!(Chikari.handle_deep_link("https://chikari.moe/api/novels/shadow-slave/chapters/1/read".into()).unwrap(), Some(DeepLinkResult::Chapter { manga_key, key }) if manga_key == "shadow-slave" && key == "1")
 		);
 		assert!(
 			matches!(Chikari.handle_deep_link("https://chikari.moe/novels/shadow-slave/1".into()).unwrap(), Some(DeepLinkResult::Chapter { manga_key, key }) if manga_key == "shadow-slave" && key == "1")
+		);
+		assert!(
+			matches!(Chikari.handle_deep_link("https://chikari.moe/series/shadow-slave/1".into()).unwrap(), Some(DeepLinkResult::Chapter { manga_key, key }) if manga_key == "shadow-slave" && key == "1")
+		);
+		assert!(
+			Chikari
+				.handle_deep_link("https://chikari.moe/series/shadow-slave/0".into())
+				.unwrap()
+				.is_none()
 		);
 	}
 }
