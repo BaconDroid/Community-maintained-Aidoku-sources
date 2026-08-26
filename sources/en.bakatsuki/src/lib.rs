@@ -70,6 +70,7 @@ impl Source for BakaTsuki {
 			})
 			.collect();
 
+		entries.sort_by(|a, b| a.title.cmp(&b.title));
 		if reverse {
 			entries.reverse();
 		}
