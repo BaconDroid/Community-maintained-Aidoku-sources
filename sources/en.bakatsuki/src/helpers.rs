@@ -1,9 +1,16 @@
 use aidoku::{
 	Chapter, ContentRating, Manga, MangaStatus, Result,
 	alloc::{String, Vec, string::ToString, vec},
-	imports::{html::Html, net::Request},
+	helpers::uri::{QueryParameters, decode_uri},
+	imports::{
+		defaults::{defaults_get, defaults_set_data},
+		html::Html,
+		net::Request,
+		std::current_date,
+	},
 	prelude::*,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::models::{CatalogueEntry, MWResponse};
 
@@ -14,16 +21,11 @@ pub const ORIGIN: &str = "https://www.baka-tsuki.org";
 // ── MediaWiki API ─────────────────────────────────────────────────
 
 pub fn mw_query(params: &[(&str, &str)]) -> Result<MWResponse> {
-	let mut url = String::from(API_URL);
-	url.push('?');
-	for (i, (k, v)) in params.iter().enumerate() {
-		if i > 0 {
-			url.push('&');
-		}
-		url.push_str(k);
-		url.push('=');
-		url.push_str(v);
+	let mut query = QueryParameters::new();
+	for (key, value) in params {
+		query.push(key, Some(value));
 	}
+	let url = format!("{API_URL}?{query}");
 
 	let resp: MWResponse = Request::get(&url)?
 		.header("User-Agent", "Mozilla/5.0 (compatible; Aidoku)")
@@ -73,9 +75,20 @@ pub fn html_to_text(html: &str) -> String {
 
 // ── Catalogue ─────────────────────────────────────────────────────
 
-/// Build the full English LN catalogue from categorymembers.
-/// 1 call for the catalogue + 5 for status categories.
+/// Build the full English LN catalogue by paginating categorymembers for the
+/// catalogue and each status category.
 pub fn build_catalogue() -> Result<Vec<CatalogueEntry>> {
+	const CACHE_KEY: &str = "en.bakatsuki.catalogue.v1";
+	const CACHE_TTL: i64 = 60 * 60;
+
+	let now = current_date();
+	if let Some(cache) = defaults_get::<CatalogueCache>(CACHE_KEY)
+		&& now >= cache.fetched_at
+		&& now - cache.fetched_at < CACHE_TTL
+	{
+		return Ok(cache.entries);
+	}
+
 	// 1. Fetch all page titles in "Category:Light novel (English)"
 	let mut titles: Vec<String> = Vec::new();
 	let mut cmcontinue: Option<String> = None;
@@ -158,7 +171,7 @@ pub fn build_catalogue() -> Result<Vec<CatalogueEntry>> {
 		}
 	}
 
-	Ok(titles
+	let catalogue = titles
 		.into_iter()
 		.map(|title| {
 			let status = status_entries
@@ -168,7 +181,20 @@ pub fn build_catalogue() -> Result<Vec<CatalogueEntry>> {
 				.unwrap_or_default();
 			CatalogueEntry { title, status }
 		})
-		.collect())
+		.collect();
+
+	let cache = CatalogueCache {
+		fetched_at: current_date(),
+		entries: catalogue,
+	};
+	defaults_set_data(CACHE_KEY, &cache);
+	Ok(cache.entries)
+}
+
+#[derive(Deserialize, Serialize)]
+struct CatalogueCache {
+	fetched_at: i64,
+	entries: Vec<CatalogueEntry>,
 }
 
 // ── Novel details ─────────────────────────────────────────────────
@@ -303,7 +329,6 @@ fn fetch_chapter_dates(titles: &[String]) -> Vec<(String, i64)> {
 			("prop", "revisions"),
 			("titles", &joined),
 			("rvprop", "timestamp"),
-			("rvlimit", "1"),
 			("format", "json"),
 			("formatversion", "2"),
 		];
@@ -329,7 +354,12 @@ fn fetch_chapter_dates(titles: &[String]) -> Vec<(String, i64)> {
 	dates
 }
 
-/// Parse MediaWiki timestamp "2024-01-15T12:34:56Z" to epoch millis.
+/// Normalize a MediaWiki title from either a URL or API link.
+pub fn normalize_title(value: &str) -> String {
+	decode_uri(value).replace('_', " ")
+}
+
+/// Parse MediaWiki timestamp "2024-01-15T12:34:56Z" to Unix seconds.
 fn parse_mw_timestamp(ts: &str) -> Option<i64> {
 	// Simple parse: "YYYY-MM-DDTHH:MM:SSZ"
 	let b = ts.as_bytes();
@@ -342,15 +372,23 @@ fn parse_mw_timestamp(ts: &str) -> Option<i64> {
 	let hour: i64 = ts[11..13].parse().ok()?;
 	let min: i64 = ts[14..16].parse().ok()?;
 	let sec: i64 = ts[17..19].parse().ok()?;
-	// Days since epoch (simplified, no leap year calc needed for ordering)
-	let mut days = (year - 1970) * 365 + (year - 1968) / 4;
+	// Count leap years using the proleptic Gregorian calendar, including the
+	// century exception and years before the Unix epoch.
+	let leap_years_before = |y: i64| {
+		let y = y - 1;
+		y.div_euclid(4) - y.div_euclid(100) + y.div_euclid(400)
+	};
+	let mut days = (year - 1970) * 365 + leap_years_before(year) - leap_years_before(1970);
 	let month_days: &[i64] = &[0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+	if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 59 {
+		return None;
+	}
 	days += month_days[(month - 1) as usize];
 	if month > 2 && (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) {
 		days += 1;
 	}
 	days += day - 1;
-	Some(((days * 86400) + hour * 3600 + min * 60 + sec) * 1000)
+	Some((days * 86400) + hour * 3600 + min * 60 + sec)
 }
 
 fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
@@ -389,10 +427,7 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 				.nth(1)
 				.and_then(|s| s.split('&').next())
 				.unwrap_or("");
-			let decoded = page_title
-				.replace("%20", " ")
-				.replace("%3A", ":")
-				.replace('_', " ");
+			let decoded = normalize_title(page_title);
 			let decoded_lower = decoded.to_ascii_lowercase();
 			if !decoded_lower.starts_with(&title_lower) {
 				continue;
@@ -531,25 +566,19 @@ pub fn parse_genre(category_title: &str) -> Option<String> {
 		.map(|g| g.trim().to_string())
 }
 
-const STATUS_CATEGORIES: &[(&str, &str)] = &[
-	("Category:Active Projects", "ongoing"),
-	("Category:Completed Project", "completed"),
-	("Category:Hosted Projects", "ongoing"),
-	("Category:Stalled Projects", "hiatus"),
-	("Category:Inactive Projects", "cancelled"),
+const STATUS_CATEGORIES: &[(&str, MangaStatus)] = &[
+	("Category:Active Projects", MangaStatus::Ongoing),
+	("Category:Completed Project", MangaStatus::Completed),
+	("Category:Hosted Projects", MangaStatus::Ongoing),
+	("Category:Stalled Projects", MangaStatus::Hiatus),
+	("Category:Inactive Projects", MangaStatus::Cancelled),
 ];
 
 pub fn parse_status_from_categories(categories: &[String]) -> MangaStatus {
 	for cat in categories {
 		for (prefix, status) in STATUS_CATEGORIES {
 			if cat == *prefix {
-				return match *status {
-					"ongoing" => MangaStatus::Ongoing,
-					"completed" => MangaStatus::Completed,
-					"hiatus" => MangaStatus::Hiatus,
-					"cancelled" => MangaStatus::Cancelled,
-					_ => MangaStatus::Unknown,
-				};
+				return *status;
 			}
 		}
 	}
@@ -652,8 +681,9 @@ pub fn extract_summary(text: &str) -> Option<String> {
 	}
 
 	let summary = result.join(" ");
-	if summary.len() > 1500 {
-		Some(format!("{}...", &summary[..1500]))
+	if summary.chars().count() > 1500 {
+		let truncated: String = summary.chars().take(1500).collect();
+		Some(format!("{truncated}..."))
 	} else if summary.is_empty() {
 		None
 	} else {
@@ -680,8 +710,11 @@ pub fn parse_chapter_number(name: &str) -> Option<f32> {
 
 pub fn parse_volume_number(name: &str) -> Option<f32> {
 	let lower = name.to_ascii_lowercase();
-	let idx = lower.find("volume")?;
-	let after = lower[idx + 6..].trim_start();
+	let (idx, prefix_len) = lower
+		.find("volume")
+		.map(|idx| (idx, 6))
+		.or_else(|| lower.find("vol.").map(|idx| (idx, 4)))?;
+	let after = lower[idx + prefix_len..].trim_start();
 	let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
 	let val: i32 = num_str.parse().ok()?;
 	Some(val as f32)
@@ -692,6 +725,7 @@ pub fn parse_volume_number(name: &str) -> Option<f32> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use aidoku_test::aidoku_test;
 
 	#[test]
 	fn test_absolute_url() {
@@ -729,7 +763,22 @@ mod tests {
 	fn test_parse_volume_number() {
 		assert_eq!(parse_volume_number("Volume 3 Chapter 1"), Some(3.0));
 		assert_eq!(parse_volume_number("Vol.5 Extra"), Some(5.0));
+		assert_eq!(parse_volume_number("Vol. 5 Extra"), Some(5.0));
 		assert_eq!(parse_volume_number("Prologue"), None);
+	}
+
+	#[aidoku_test]
+	fn test_parse_mw_timestamp_returns_seconds() {
+		assert_eq!(parse_mw_timestamp("1970-01-01T00:00:00Z"), Some(0));
+		assert_eq!(parse_mw_timestamp("1970-01-02T00:00:00Z"), Some(86_400));
+	}
+
+	#[test]
+	fn test_normalize_title() {
+		assert_eq!(
+			normalize_title("Foo%3AVolume_1_Chapter_1"),
+			"Foo:Volume 1 Chapter 1"
+		);
 	}
 
 	#[test]
@@ -742,7 +791,7 @@ mod tests {
 		);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn test_html_to_text() {
 		let html = "<p>Hello world.</p><p>Second paragraph.</p>";
 		let out = html_to_text(html);

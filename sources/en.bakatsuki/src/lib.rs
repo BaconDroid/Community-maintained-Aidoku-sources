@@ -2,7 +2,7 @@
 use aidoku::{
 	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
 	MangaPageResult, Page, PageContent, Result, Source,
-	alloc::{String, Vec, string::ToString, vec},
+	alloc::{String, Vec, vec},
 	prelude::*,
 };
 
@@ -181,12 +181,27 @@ impl ListingProvider for BakaTsuki {
 
 impl DeepLinkHandler for BakaTsuki {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
-		let path = url
-			.split(['?', '#'])
-			.next()
-			.unwrap_or(&url)
-			.trim_start_matches("https://www.baka-tsuki.org/project/")
-			.trim_start_matches("index.php?title=");
+		let raw_url = url.split('#').next().unwrap_or(&url);
+		let title_parameter = raw_url.split_once('?').and_then(|(path, query)| {
+			if path.ends_with("index.php") {
+				query
+					.split('&')
+					.find_map(|parameter| parameter.strip_prefix("title="))
+			} else {
+				None
+			}
+		});
+		let path = title_parameter
+			.map(helpers::normalize_title)
+			.unwrap_or_else(|| {
+				helpers::normalize_title(
+					raw_url
+						.split('?')
+						.next()
+						.unwrap_or(raw_url)
+						.trim_start_matches("https://www.baka-tsuki.org/project/"),
+				)
+			});
 
 		if path.is_empty() {
 			return Ok(None);
@@ -194,13 +209,11 @@ impl DeepLinkHandler for BakaTsuki {
 
 		// Check for chapter (contains ":")
 		if let Some(idx) = path.find(':') {
-			let novel_title = path[..idx].replace("%20", " ");
-			let chapter_path = path[idx..].replace("%20", " ");
+			let novel_title: String = path[..idx].into();
+			let chapter_path = path.clone();
 			let chapters = fetch_chapter_list(&novel_title)?;
 			for ch in &chapters {
-				if let Some(ref ch_url) = ch.url
-					&& ch_url.ends_with(&chapter_path)
-				{
+				if ch.key == chapter_path {
 					return Ok(Some(DeepLinkResult::Chapter {
 						manga_key: novel_title,
 						key: ch.key.clone(),
@@ -209,16 +222,16 @@ impl DeepLinkHandler for BakaTsuki {
 			}
 		}
 
-		let novel_title = path.replace("%20", " ");
-		Ok(Some(DeepLinkResult::Manga { key: novel_title }))
+		Ok(Some(DeepLinkResult::Manga { key: path }))
 	}
 }
 
 // ── Search implementation ─────────────────────────────────────────
 
 fn search_remote(search_term: &str, page: i32) -> Result<MangaPageResult> {
-	if page == 1 {
-		// Hybrid local + remote search on page 1
+	if page >= 1 {
+		// Hybrid local + remote search. Rebuild the same ordered result set for
+		// every page so page two cannot overlap or skip page-one results.
 		let catalogue = build_catalogue()?;
 		let query_lower = search_term.to_ascii_lowercase();
 
@@ -229,7 +242,6 @@ fn search_remote(search_term: &str, page: i32) -> Result<MangaPageResult> {
 			.filter(|(s, _)| *s > 0)
 			.collect();
 		local.sort_by_key(|a| core::cmp::Reverse(a.0));
-		local.truncate(PAGE_SIZE as usize);
 
 		// Remote prefixsearch
 		let params = vec![
@@ -281,11 +293,16 @@ fn search_remote(search_term: &str, page: i32) -> Result<MangaPageResult> {
 			}
 		}
 		combined.sort_by_key(|a| core::cmp::Reverse(a.0));
-		combined.truncate(PAGE_SIZE as usize);
-
-		let has_next_page = combined.len() == PAGE_SIZE as usize;
+		let start = ((page - 1) * PAGE_SIZE) as usize;
+		if start >= combined.len() {
+			return Ok(MangaPageResult::default());
+		}
+		let end = core::cmp::min(start + PAGE_SIZE as usize, combined.len());
+		let has_next_page = end < combined.len();
 		let entries = combined
 			.into_iter()
+			.skip(start)
+			.take(end - start)
 			.map(|(_, title)| Manga {
 				key: title.clone(),
 				title: title.clone(),
@@ -303,45 +320,7 @@ fn search_remote(search_term: &str, page: i32) -> Result<MangaPageResult> {
 			has_next_page,
 		})
 	} else {
-		// Page 2+: pure API search
-		let offset = ((page - 1) * PAGE_SIZE).to_string();
-		let params = vec![
-			("action", "query"),
-			("list", "search"),
-			("srsearch", search_term),
-			("srnamespace", "0"),
-			("srlimit", "40"),
-			("sroffset", &offset),
-			("format", "json"),
-			("formatversion", "2"),
-		];
-		let resp = mw_query(&params)?;
-		let results: Vec<String> = resp
-			.query
-			.iter()
-			.flat_map(|q| q.search.iter().flat_map(|v| v.iter()))
-			.map(|t| t.title.clone())
-			.collect();
-
-		let has_next_page = results.len() == 40;
-		let entries = results
-			.into_iter()
-			.map(|title| Manga {
-				key: title.clone(),
-				title: title.clone(),
-				url: Some(format!(
-					"{}/index.php?title={}",
-					BASE_URL,
-					title.replace(' ', "%20")
-				)),
-				..Default::default()
-			})
-			.collect();
-
-		Ok(MangaPageResult {
-			entries,
-			has_next_page,
-		})
+		Ok(MangaPageResult::default())
 	}
 }
 
@@ -380,6 +359,26 @@ mod tests {
 			.get_search_manga_list(Some("Apocalypse Witch".into()), 1, Vec::new())
 			.expect("search failed");
 		assert!(!result.entries.is_empty(), "expected at least one result");
+	}
+
+	#[aidoku_test]
+	fn search_pages_do_not_repeat_results() {
+		let source = BakaTsuki;
+		let page_one = source
+			.get_search_manga_list(Some("the".into()), 1, Vec::new())
+			.expect("page one search failed");
+		if page_one.has_next_page {
+			let page_two = source
+				.get_search_manga_list(Some("the".into()), 2, Vec::new())
+				.expect("page two search failed");
+			assert!(
+				page_one.entries.iter().all(|first| !page_two
+					.entries
+					.iter()
+					.any(|second| second.key == first.key)),
+				"page two must not repeat page one results"
+			);
+		}
 	}
 
 	#[aidoku_test]

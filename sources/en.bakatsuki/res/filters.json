@@ -8,10 +8,6 @@
 			"A → Z",
 			"Z → A"
 		],
-		"ids": [
-			"asc",
-			"desc"
-		],
 		"default": {
 			"index": 0,
 			"ascending": true

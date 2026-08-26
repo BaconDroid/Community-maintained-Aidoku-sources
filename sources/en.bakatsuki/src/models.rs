@@ -1,5 +1,5 @@
 use aidoku::alloc::{String, Vec};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Top-level MediaWiki API response.
 #[derive(Deserialize)]
@@ -57,7 +57,7 @@ pub struct MWPage {
 	#[serde(default)]
 	pub categories: Option<Vec<MWCategory>>,
 	#[serde(default)]
-	pub missing: Option<String>,
+	pub missing: Option<bool>,
 	#[serde(default)]
 	pub revisions: Option<Vec<MWRevision>>,
 }
@@ -104,7 +104,7 @@ pub struct MWParse {
 // ── Non-API structs ────────────────────────────────────────────────
 
 /// In-memory novel catalogue entry (built from categorymembers).
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct CatalogueEntry {
 	pub title: String,
 	pub status: String,
