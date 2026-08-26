@@ -206,7 +206,7 @@ pub fn parse_iso_date(value: &str) -> Option<i64> {
 }
 pub fn body_to_text(body: String) -> Result<String> {
 	let text = body
-		.split('\n')
+		.lines()
 		.map(str::trim)
 		.filter(|line| !line.is_empty())
 		.collect::<Vec<_>>()
