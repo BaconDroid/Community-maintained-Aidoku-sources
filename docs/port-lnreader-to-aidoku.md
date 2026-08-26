@@ -64,7 +64,7 @@ aidoku package && aidoku verify package.aix
 - Check upstream `.github` for PR and issue templates. If none exists, match recent PR title/body conventions, such as:
   - Title: `feat: add en.chikari`
   - Body: `## Changes` with concise feature sections and a `Validation` section.
-- Fork review cadence: wait 20 minutes, address valid comments, and repeat until two clean passes. Then wait one hour, trigger CodeRabbit with `@coderabbitai full review` for an already-reviewed commit, wait 20 minutes, and inspect.
+- Fork review cadence: wait 20 minutes, inspect ALL comments/checks from ALL bots, address valid findings, and repeat until two clean passes. Then wait one hour, trigger ALL bots that have responded on the PR — each bot must read existing PR comments and explain how it would address them — wait 20 minutes, and inspect. Stop when no actionable findings remain or a finding recurs as a verified false positive.
 - Apply the scope restriction from this playbook: run automated bot loops only on the BaconDroid fork or Tachiyomi repositories.
 - Upstream: create the PR from the prepared upstream branch. Do not start an automated bot loop outside the allowed repositories.
 
