@@ -412,7 +412,7 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 			if href.starts_with("http://") || href.starts_with("https://") {
 				continue;
 			}
-			if href.contains("?action=edit") {
+			if href.contains("redlink=1") {
 				continue;
 			}
 			if href.ends_with(".pdf") || href.ends_with(".epub") || href.ends_with(".zip") {
@@ -469,8 +469,9 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 		}
 	}
 
-	// Sort by volume, then by chapter number
-	chapters.sort_by(|a, b| {
+	// Sort by volume, then by chapter number, preserving document order on ties
+	let mut indexed: Vec<(usize, Chapter)> = chapters.into_iter().enumerate().collect();
+	indexed.sort_by(|(idx_a, a), (idx_b, b)| {
 		let vol_a = a.volume_number.unwrap_or(f32::MAX);
 		let vol_b = b.volume_number.unwrap_or(f32::MAX);
 		vol_a.total_cmp(&vol_b).then_with(|| {
@@ -478,8 +479,10 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 			let ch_b = b.chapter_number.unwrap_or(0.0);
 			ch_a.partial_cmp(&ch_b)
 				.unwrap_or(core::cmp::Ordering::Equal)
+				.then_with(|| idx_a.cmp(idx_b))
 		})
 	});
+	let chapters: Vec<Chapter> = indexed.into_iter().map(|(_, c)| c).collect();
 
 	chapters
 }
@@ -630,6 +633,8 @@ fn is_structural_category(title: &str) -> bool {
 		"unassessed",
 		"underlinked",
 		"cleanup",
+		"bunko",
+		"shobo",
 	];
 	prefixes.iter().any(|p| lower.starts_with(p))
 }

@@ -1,0 +1,52 @@
+name: cargo-deny
+on:
+  pull_request:
+    paths:
+      - "sources/**"
+      - "deny.toml"
+      - ".github/workflows/deny.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get changed files
+        id: files
+        uses: Ana06/get-changed-files@v2.2.0
+        with:
+          format: json
+      - name: Cache rust stuff
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-deny-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-deny-
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+      - name: Run cargo-deny on changed sources
+        run: |
+          shopt -s globstar
+          readarray -t TEMP <<< "$(jq -r '.[]' <<<'${{ steps.files.outputs.added_modified }}')"
+
+          FAIL=0
+          while IFS= read -r -d $'\0' i; do
+            if [[ "$i" == *"sources"* ]]; then
+              SRC_DIR=$(echo "$i" | cut -d'/' -f-2)
+              if [ -d "$SRC_DIR" ] && [ -f "$SRC_DIR/Cargo.toml" ]; then
+                echo "::group::cargo-deny $SRC_DIR"
+                (cd "$SRC_DIR" && cargo deny --config "${{ github.workspace }}/deny.toml" check advisories licenses bans sources) || FAIL=1
+                echo "::endgroup::"
+              fi
+            fi
+          done < <(printf "%s\n" "${TEMP[@]}" | cut -d'/' -f-2 | sort -u | grep '^sources' | tr '\n' '\0')
+
+          exit $FAIL

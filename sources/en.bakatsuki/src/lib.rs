@@ -281,6 +281,7 @@ fn search_remote(search_term: &str, page: i32) -> Result<MangaPageResult> {
 				remote_titles.push(t.title.clone());
 			}
 		}
+		remote_titles.retain(|t| !t.contains(':'));
 
 		// Score remote results lower than local
 		let mut combined: Vec<(i32, String)> = local;
