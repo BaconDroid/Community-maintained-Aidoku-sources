@@ -1,0 +1,21 @@
+{
+	"info": {
+		"id": "en.bakatsuki",
+		"name": "Baka-Tsuki",
+		"version": 1,
+		"url": "https://www.baka-tsuki.org",
+		"contentRating": 1,
+		"languages": ["en"],
+		"minAppVersion": "0.8.3"
+	},
+	"listings": [
+		{
+			"id": "library",
+			"name": "Library"
+		},
+		{
+			"id": "latest",
+			"name": "Latest"
+		}
+	]
+}
