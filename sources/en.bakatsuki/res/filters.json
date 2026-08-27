@@ -1,0 +1,23 @@
+[
+	{
+		"type": "sort",
+		"id": "order",
+		"title": "Order",
+		"canAscend": false,
+		"options": [
+			"A → Z",
+			"Z → A"
+		],
+		"default": {
+			"index": 0,
+			"ascending": true
+		}
+	},
+	{
+		"type": "select",
+		"id": "status",
+		"title": "Status",
+		"options": ["All", "Active", "Completed", "Stalled", "Inactive"],
+		"ids": ["all", "ongoing", "completed", "hiatus", "cancelled"]
+	}
+]
