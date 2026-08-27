@@ -475,11 +475,9 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 		let vol_a = a.volume_number.unwrap_or(f32::MAX);
 		let vol_b = b.volume_number.unwrap_or(f32::MAX);
 		vol_a.total_cmp(&vol_b).then_with(|| {
-			match (a.chapter_number, b.chapter_number) {
-				(Some(ca), Some(cb)) => ca.partial_cmp(&cb).unwrap_or(core::cmp::Ordering::Equal),
-				// When either chapter number is absent, preserve document order
-				_ => idx_a.cmp(idx_b),
-			}
+			let ch_a = a.chapter_number.unwrap_or(f32::MAX);
+			let ch_b = b.chapter_number.unwrap_or(f32::MAX);
+			ch_a.total_cmp(&ch_b).then_with(|| idx_a.cmp(idx_b))
 		})
 	});
 	let chapters: Vec<Chapter> = indexed.into_iter().map(|(_, c)| c).collect();
