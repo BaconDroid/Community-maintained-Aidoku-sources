@@ -215,7 +215,7 @@ pub fn fetch_novel_details(title: &str) -> Result<NovelDetail> {
 		("titles", title),
 		("prop", "extracts|pageimages|categories"),
 		("explaintext", "1"),
-		("exsectionformat", "raw"),
+		("exsectionformat", "wiki"),
 		("piprop", "thumbnail"),
 		("pithumbsize", "400"),
 		("cllimit", "500"),
@@ -475,11 +475,11 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 		let vol_a = a.volume_number.unwrap_or(f32::MAX);
 		let vol_b = b.volume_number.unwrap_or(f32::MAX);
 		vol_a.total_cmp(&vol_b).then_with(|| {
-			let ch_a = a.chapter_number.unwrap_or(0.0);
-			let ch_b = b.chapter_number.unwrap_or(0.0);
-			ch_a.partial_cmp(&ch_b)
-				.unwrap_or(core::cmp::Ordering::Equal)
-				.then_with(|| idx_a.cmp(idx_b))
+			match (a.chapter_number, b.chapter_number) {
+				(Some(ca), Some(cb)) => ca.partial_cmp(&cb).unwrap_or(core::cmp::Ordering::Equal),
+				// When either chapter number is absent, preserve document order
+				_ => idx_a.cmp(idx_b),
+			}
 		})
 	});
 	let chapters: Vec<Chapter> = indexed.into_iter().map(|(_, c)| c).collect();
