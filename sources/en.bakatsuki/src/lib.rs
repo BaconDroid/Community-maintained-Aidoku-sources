@@ -92,11 +92,7 @@ impl Source for BakaTsuki {
 			.map(|e| Manga {
 				key: e.title.clone(),
 				title: e.title.clone(),
-				url: Some(format!(
-					"{}/index.php?title={}",
-					BASE_URL,
-					e.title.replace(' ', "%20")
-				)),
+				url: Some(novel_url(&e.title)),
 				..Default::default()
 			})
 			.collect();
@@ -122,11 +118,7 @@ impl Source for BakaTsuki {
 			manga.tags = detail.tags;
 			manga.status = detail.status;
 			manga.content_rating = detail.content_rating;
-			manga.url = Some(format!(
-				"{}/index.php?title={}",
-				BASE_URL,
-				manga.key.replace(' ', "%20")
-			));
+			manga.url = Some(novel_url(&manga.key));
 		}
 		if needs_chapters {
 			let chapters = fetch_chapter_list(&manga.key)?;
@@ -212,15 +204,17 @@ impl DeepLinkHandler for BakaTsuki {
 		if let Some(idx) = path.find(':') {
 			let novel_title: String = path[..idx].into();
 			let chapter_path = path.clone();
-			let chapters = fetch_chapter_list(&novel_title)?;
-			for ch in &chapters {
-				if ch.key == chapter_path {
-					return Ok(Some(DeepLinkResult::Chapter {
-						manga_key: novel_title,
-						key: ch.key.clone(),
-					}));
+			if let Ok(chapters) = fetch_chapter_list(&novel_title) {
+				for ch in &chapters {
+					if ch.key == chapter_path {
+						return Ok(Some(DeepLinkResult::Chapter {
+							manga_key: novel_title,
+							key: ch.key.clone(),
+						}));
+					}
 				}
 			}
+			return Ok(Some(DeepLinkResult::Manga { key: novel_title }));
 		}
 
 		Ok(Some(DeepLinkResult::Manga { key: path }))
@@ -308,11 +302,7 @@ fn search_remote(search_term: &str, page: i32) -> Result<MangaPageResult> {
 			.map(|(_, title)| Manga {
 				key: title.clone(),
 				title: title.clone(),
-				url: Some(format!(
-					"{}/index.php?title={}",
-					BASE_URL,
-					title.replace(' ', "%20")
-				)),
+				url: Some(novel_url(&title)),
 				..Default::default()
 			})
 			.collect();

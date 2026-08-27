@@ -41,6 +41,13 @@ pub fn mw_query(params: &[(&str, &str)]) -> Result<MWResponse> {
 
 // ── URL helpers ───────────────────────────────────────────────────
 
+/// Build a `index.php?title=...` URL, percent-encoding the title value.
+pub fn novel_url(title: &str) -> String {
+	let mut query = QueryParameters::new();
+	query.push("title", Some(title));
+	format!("{BASE_URL}/index.php?{query}")
+}
+
 pub fn absolute_url(path: &str) -> String {
 	if path.starts_with("http://") || path.starts_with("https://") {
 		path.into()
