@@ -187,7 +187,9 @@ pub fn build_catalogue() -> Result<Vec<CatalogueEntry>> {
 		fetched_at: current_date(),
 		entries: catalogue,
 	};
-	defaults_set_data(CACHE_KEY, &cache);
+	if !cache.entries.is_empty() {
+		defaults_set_data(CACHE_KEY, &cache);
+	}
 	Ok(cache.entries)
 }
 
