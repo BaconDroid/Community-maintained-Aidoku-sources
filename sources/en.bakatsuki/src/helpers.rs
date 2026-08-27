@@ -496,9 +496,8 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 			ch_a.total_cmp(&ch_b).then_with(|| idx_a.cmp(idx_b))
 		})
 	});
-	let chapters: Vec<Chapter> = indexed.into_iter().map(|(_, c)| c).collect();
 
-	chapters
+	indexed.into_iter().map(|(_, c)| c).collect()
 }
 
 // ── Chapter content ───────────────────────────────────────────────
