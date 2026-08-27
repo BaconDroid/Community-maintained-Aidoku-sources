@@ -633,10 +633,10 @@ fn is_structural_category(title: &str) -> bool {
 		"unassessed",
 		"underlinked",
 		"cleanup",
-		"bunko",
-		"shobo",
 	];
-	prefixes.iter().any(|p| lower.starts_with(p))
+	// Publisher imprints appear anywhere in the category name (e.g. "MF Bunko J")
+	let is_imprint = lower.contains("bunko") || lower.contains("shobo");
+	prefixes.iter().any(|p| lower.starts_with(p)) || is_imprint
 }
 
 // ── Summary extraction ────────────────────────────────────────────
