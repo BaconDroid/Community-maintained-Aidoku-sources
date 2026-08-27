@@ -372,7 +372,13 @@ pub fn normalize_title(value: &str) -> String {
 fn parse_mw_timestamp(ts: &str) -> Option<i64> {
 	// Simple parse: "YYYY-MM-DDTHH:MM:SSZ"
 	let b = ts.as_bytes();
-	if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[19] != b'Z' {
+	if !ts.is_ascii()
+		|| b.len() < 20
+		|| b[4] != b'-'
+		|| b[7] != b'-'
+		|| b[10] != b'T'
+		|| b[19] != b'Z'
+	{
 		return None;
 	}
 	let year: i64 = ts[0..4].parse().ok()?;
@@ -417,8 +423,9 @@ fn parse_chapter_links(html: &str, novel_title: &str) -> Vec<Chapter> {
 				None => continue,
 			};
 
-			// Skip external links, file downloads, edit links
-			if href.starts_with("http://") || href.starts_with("https://") {
+			// Skip external links, protocol-relative links, file downloads, edit links
+			if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("//")
+			{
 				continue;
 			}
 			if href.contains("redlink=1") {
