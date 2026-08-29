@@ -171,11 +171,7 @@ pub fn manga_from_list(item: NovelListItem, content_type: ContentType) -> Manga 
 		title: item.title,
 		cover: item.cover_url,
 		url,
-		content_rating: if item.is_nsfw {
-			ContentRating::NSFW
-		} else {
-			ContentRating::Safe
-		},
+		content_rating: content_rating(item.is_nsfw, &item.genres, &item.tags),
 		status: item
 			.status
 			.as_deref()
@@ -462,6 +458,26 @@ mod tests {
 	}
 
 	#[aidoku_test]
+	fn list_item_content_rating_matches_detail() {
+		// Regression: list entries must use the same content_rating logic as detail entries.
+		use crate::models::Named;
+		let item = crate::models::NovelListItem {
+			slug: "test".into(),
+			title: "Test".into(),
+			cover_url: None,
+			status: None,
+			is_nsfw: false,
+			genres: vec![Named {
+				name: "Mature".into(),
+				role: None,
+			}],
+			tags: vec![],
+		};
+		let manga = manga_from_list(item, ContentType::Novel);
+		assert_eq!(manga.content_rating, ContentRating::Suggestive);
+	}
+
+	#[aidoku_test]
 	fn list_url_retains_repeated_filters() {
 		let filters = [FilterValue::MultiSelect {
 			id: "genres".into(),
@@ -530,6 +546,8 @@ mod tests {
 			cover_url: None,
 			status: None,
 			is_nsfw: false,
+			genres: vec![],
+			tags: vec![],
 		};
 		let novel = manga_from_list(item("novel"), ContentType::Novel);
 		assert_eq!(novel.key, "novel");

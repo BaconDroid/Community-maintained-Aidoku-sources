@@ -23,6 +23,10 @@ pub struct NovelListItem {
 	pub status: Option<String>,
 	#[serde(default)]
 	pub is_nsfw: bool,
+	#[serde(default)]
+	pub genres: Vec<Named>,
+	#[serde(default)]
+	pub tags: Vec<Tag>,
 }
 
 #[derive(Deserialize)]
