@@ -3,7 +3,7 @@ use crate::{BASE_URL, USER_AGENT};
 use aidoku::{
 	Chapter, ContentRating, FilterValue, Manga, MangaPageResult, MangaStatus, Result, Viewer,
 	alloc::{String, Vec, string::ToString},
-	helpers::uri::QueryParameters,
+	helpers::{string::PlainText, uri::QueryParameters},
 	imports::defaults::defaults_get,
 	imports::{net::Request, std::parse_date},
 	prelude::*,
@@ -82,17 +82,12 @@ pub fn content_type_from_setting_value(value: Option<&str>) -> ContentType {
 }
 
 pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
-	let response = Request::get(url)?
+	Request::get(url)?
 		.header("User-Agent", USER_AGENT)
 		.header("Accept", "application/json")
 		.header("Referer", BASE_URL)
 		.header("Origin", BASE_URL)
-		.send()?;
-	let status = response.status_code();
-	if !(200..300).contains(&status) {
-		bail!("Chikari request failed with HTTP status {status} for {url}");
-	}
-	response.get_json_owned::<T>()
+		.json_owned::<T>()
 }
 
 pub fn list_url(
@@ -185,7 +180,11 @@ pub fn manga_from_list(item: NovelListItem, content_type: ContentType) -> Manga 
 		cover: item.cover_url,
 		url,
 		content_rating: list_content_rating(item.is_nsfw),
-		status: item.status.as_deref().map(parse_status).unwrap_or_default(),
+		status: item
+			.status
+			.as_deref()
+			.map(parse_status)
+			.unwrap_or(MangaStatus::Unknown),
 		..Default::default()
 	}
 }
@@ -246,7 +245,7 @@ pub fn manga_from_detail(detail: NovelDetail, content_type: ContentType) -> Mang
 			.status
 			.as_deref()
 			.map(parse_status)
-			.unwrap_or_default(),
+			.unwrap_or(MangaStatus::Unknown),
 		content_rating,
 		viewer: viewer_for_series(detail.reading_mode.as_deref(), detail.kind.as_deref()),
 		..Default::default()
@@ -313,15 +312,18 @@ pub fn chapter_from_item(item: ChapterItem) -> Chapter {
 	let key = chapter_key(item.number);
 	Chapter {
 		key,
-		title: item.title.filter(|s| !s.trim().is_empty()),
+		title: Some(
+			item.title
+				.filter(|s| !s.trim().is_empty())
+				.unwrap_or_else(|| format!("Chapter {}", item.number)),
+		),
 		chapter_number: Some(item.number),
 		date_uploaded: item.created_at.as_deref().and_then(parse_iso_date),
 		..Default::default()
 	}
 }
-pub(crate) const CHAPTER_PAGE_SIZE: u32 = 500;
-
 pub fn fetch_chapters(slug: &str, content_type: ContentType) -> Result<Vec<Chapter>> {
+	const CHAPTER_PAGE_SIZE: u32 = 500;
 	let mut result = Vec::new();
 	let mut offset = 0u32;
 	loop {
@@ -421,6 +423,7 @@ pub fn body_to_text(body: String) -> Result<String> {
 		.lines()
 		.map(str::trim)
 		.filter(|line| !line.is_empty())
+		.map(|line| line.escape_markdown())
 		.collect::<Vec<_>>()
 		.join("\n\n");
 	if text.is_empty() {
@@ -630,20 +633,20 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn empty_chapter_titles_remain_absent() {
+	fn empty_chapter_titles_fallback_to_chapter_number() {
 		let empty = chapter_from_item(crate::models::ChapterItem {
 			number: 1.0,
 			title: Some("  ".into()),
 			created_at: None,
 		});
-		assert_eq!(empty.title, None);
+		assert_eq!(empty.title.as_deref(), Some("Chapter 1"));
 
 		let missing = chapter_from_item(crate::models::ChapterItem {
 			number: 2.0,
 			title: None,
 			created_at: None,
 		});
-		assert_eq!(missing.title, None);
+		assert_eq!(missing.title.as_deref(), Some("Chapter 2"));
 
 		let present = chapter_from_item(crate::models::ChapterItem {
 			number: 3.0,
@@ -692,5 +695,11 @@ mod tests {
 	#[aidoku_test]
 	fn rejects_non_ascii_timezone_offset() {
 		assert!(parse_iso_date("2026-02-21T22:08:14\u{2014}05:00").is_none());
+	}
+
+	#[aidoku_test]
+	fn body_to_text_escapes_markdown() {
+		let result = body_to_text("***".into()).expect("body_to_text failed");
+		assert_eq!(result, "\\*\\*\\*");
 	}
 }

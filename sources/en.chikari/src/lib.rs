@@ -208,7 +208,7 @@ register_source!(Chikari, ListingProvider, DynamicSettings, DeepLinkHandler);
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::helpers::{CHAPTER_PAGE_SIZE, chapter_key};
+	use crate::helpers::chapter_key;
 	use aidoku_test::aidoku_test;
 	#[aidoku_test]
 	fn search_returns_shadow_slave() {
@@ -237,7 +237,7 @@ mod tests {
 		assert_eq!(manga.title, "Shadow Slave");
 		assert!(manga.description.is_some());
 		let chapters = manga.chapters.expect("chapters missing");
-		assert!(chapters.len() > CHAPTER_PAGE_SIZE as usize);
+		assert!(chapters.len() > 500);
 		assert!(
 			chapters
 				.iter()
