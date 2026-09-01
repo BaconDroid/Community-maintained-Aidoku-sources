@@ -90,7 +90,7 @@ pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 		.send()?;
 	let status = response.status_code();
 	if !(200..300).contains(&status) {
-		bail!("Chikari request failed with HTTP status {status}");
+		bail!("Chikari request failed with HTTP status {status} for {url}");
 	}
 	response.get_json_owned::<T>()
 }
@@ -319,7 +319,7 @@ pub fn chapter_from_item(item: ChapterItem) -> Chapter {
 		..Default::default()
 	}
 }
-const CHAPTER_PAGE_SIZE: u32 = 500;
+pub(crate) const CHAPTER_PAGE_SIZE: u32 = 500;
 
 pub fn fetch_chapters(slug: &str, content_type: ContentType) -> Result<Vec<Chapter>> {
 	let mut result = Vec::new();
@@ -362,6 +362,9 @@ pub fn parse_iso_date(value: &str) -> Option<i64> {
 		.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
 	if offset.is_empty() || offset == "Z" {
 		return Some(base);
+	}
+	if !offset.is_ascii() {
+		return None;
 	}
 	let (sign, magnitude) = offset.split_at(1);
 	let sign = match sign {
@@ -684,5 +687,10 @@ mod tests {
 		assert_eq!(manga.authors, Some(vec!["Writer".into()]));
 		assert_eq!(manga.artists, Some(vec!["Artist".into()]));
 		assert_eq!(manga.viewer, Viewer::Webtoon);
+	}
+
+	#[aidoku_test]
+	fn rejects_non_ascii_timezone_offset() {
+		assert!(parse_iso_date("2026-02-21T22:08:14\u{2014}05:00").is_none());
 	}
 }

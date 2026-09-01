@@ -92,7 +92,7 @@ impl Source for Chikari {
 					raw_slug,
 					chapter.key
 				))?;
-				let text = if data.locked || data.body.is_empty() {
+				let text = if data.locked || data.body.trim().is_empty() {
 					"This chapter is locked (early access)".into()
 				} else {
 					body_to_text(data.body)?
@@ -208,7 +208,7 @@ register_source!(Chikari, ListingProvider, DynamicSettings, DeepLinkHandler);
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::helpers::chapter_key;
+	use crate::helpers::{CHAPTER_PAGE_SIZE, chapter_key};
 	use aidoku_test::aidoku_test;
 	#[aidoku_test]
 	fn search_returns_shadow_slave() {
@@ -237,7 +237,7 @@ mod tests {
 		assert_eq!(manga.title, "Shadow Slave");
 		assert!(manga.description.is_some());
 		let chapters = manga.chapters.expect("chapters missing");
-		assert!(chapters.len() > 3000);
+		assert!(chapters.len() > CHAPTER_PAGE_SIZE as usize);
 		assert!(
 			chapters
 				.iter()
