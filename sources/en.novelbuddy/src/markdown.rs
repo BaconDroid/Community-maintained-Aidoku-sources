@@ -377,13 +377,4 @@ mod tests {
 			"image: {out}"
 		);
 	}
-
-
-
-
-
-
-
-
-
 }

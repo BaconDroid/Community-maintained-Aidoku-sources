@@ -27,29 +27,26 @@ const PROSE_BLOCKS: &[(u32, u32)] = &[
 /// come from. Symmetric quotes are left out on purpose: `"` and `'`
 /// cannot tell an opener from a closer, and `'` is the apostrophe of
 /// every contraction on the site.
+///
+/// Test-only: these tables exist so the repair tables below cannot rot
+/// unnoticed — see `repair_pairs_come_from_whitelisted_blocks`.
+#[cfg(test)]
 const BASIC_LATIN_PAIRS: &[(char, char)] = &[('(', ')'), ('[', ']'), ('{', '}')];
 
 /// Asymmetric delimiter pairs in Latin-1 Supplement.
+#[cfg(test)]
 const LATIN_1_PAIRS: &[(char, char)] = &[('«', '»')];
 
 /// Asymmetric delimiter pairs in General Punctuation.
-const GENERAL_PUNCTUATION_PAIRS: &[(char, char)] = &[
-	('‘', '’'),
-	('“', '”'),
-	('‹', '›'),
-	('⁅', '⁆'),
-];
+#[cfg(test)]
+const GENERAL_PUNCTUATION_PAIRS: &[(char, char)] =
+	&[('‘', '’'), ('“', '”'), ('‹', '›'), ('⁅', '⁆')];
 
 /// Pairs the cut may close by extending to the matching closer, found
 /// past the cut point. General Punctuation only: `‘’` and `“”` are the
 /// pairs the cut actually strands on live chapters, and their closers
 /// were never seen inside a credit on ~500 chapters.
-const EXTEND_PAIRS: &[(char, char)] = &[
-	('‘', '’'),
-	('“', '”'),
-	('‹', '›'),
-	('⁅', '⁆'),
-];
+const EXTEND_PAIRS: &[(char, char)] = &[('‘', '’'), ('“', '”'), ('‹', '›'), ('⁅', '⁆')];
 
 /// Pairs the cut may close by appending the missing closer: everything
 /// at or below Latin-1. The credit frames its own domain in
@@ -61,17 +58,26 @@ const CREATE_PAIRS: &[(char, char)] = &[('(', ')'), ('[', ']'), ('{', '}'), ('«
 /// Whether `ch` can appear in the chapter text.
 fn is_prose_char(ch: char) -> bool {
 	let code = u32::from(ch);
-	ch.is_whitespace() || PROSE_BLOCKS.iter().any(|(start, end)| (*start..=*end).contains(&code))
+	ch.is_whitespace()
+		|| PROSE_BLOCKS
+			.iter()
+			.any(|(start, end)| (*start..=*end).contains(&code))
 }
 
 /// The closer `open` pairs with when extending, if it is handled.
 fn extend_close(open: char) -> Option<char> {
-	EXTEND_PAIRS.iter().find(|pair| pair.0 == open).map(|pair| pair.1)
+	EXTEND_PAIRS
+		.iter()
+		.find(|pair| pair.0 == open)
+		.map(|pair| pair.1)
 }
 
 /// The closer `open` pairs with when creating, if it is handled.
 fn create_close(open: char) -> Option<char> {
-	CREATE_PAIRS.iter().find(|pair| pair.0 == open).map(|pair| pair.1)
+	CREATE_PAIRS
+		.iter()
+		.find(|pair| pair.0 == open)
+		.map(|pair| pair.1)
 }
 
 /// The opener `close` pairs with, in either table.
@@ -89,10 +95,10 @@ fn unbalanced(text: &str) -> Vec<char> {
 	for ch in text.chars() {
 		if extend_close(ch).is_some() || create_close(ch).is_some() {
 			stack.push(ch);
-		} else if let Some(open) = matching_opener(ch) {
-			if stack.last() == Some(&open) {
-				stack.pop();
-			}
+		} else if let Some(open) = matching_opener(ch)
+			&& stack.last() == Some(&open)
+		{
+			stack.pop();
 		}
 	}
 	stack
@@ -110,7 +116,9 @@ fn unbalanced(text: &str) -> Vec<char> {
 fn append_block(output: &mut String, block: &str) {
 	let mut kept: Vec<String> = Vec::new();
 	for line in block.trim().lines() {
-		match line.chars().position(|ch| !is_prose_char(ch)) {
+		// `find` yields a byte index, unlike `chars().position`: slicing
+		// with a character index would split multi-byte punctuation.
+		match line.find(|ch| !is_prose_char(ch)) {
 			None => kept.push(line.into()),
 			Some(index) => {
 				// No sentence end in front of the credit means the line
@@ -224,7 +232,10 @@ mod tests {
 			"She pointed up\n\nThe sourc\u{1D5F2} of this content is \
 			 fre\u{113}w\u{113}b\u{3B7}ovel.c\u{0AE6}m\\.\n\n\u{201C}How do you know that\u{201D}\n\n",
 		);
-		assert_eq!(out, "She pointed up\n\n\u{201C}How do you know that\u{201D}");
+		assert_eq!(
+			out,
+			"She pointed up\n\n\u{201C}How do you know that\u{201D}"
+		);
 	}
 
 	#[aidoku_test]
@@ -296,10 +307,8 @@ mod tests {
 		// General Punctuation and Latin-1 pairs are closed by extending
 		// to the closer: the opener sits in front of the cut point, so
 		// the sentence between them is prose and comes back whole.
-		let out = strip(
-			"She said \u{201Ch}i. \u{2E22}x\u{2E25} there\u{201D} end\n\n",
-		);
-		assert_eq!(out, "She said \u{201Ch}i. \u{2E22}x\u{2E25} there\u{201D}");
+		let out = strip("She said \u{201C}hi. \u{2E22}x\u{2E25} there\u{201D} end\n\n");
+		assert_eq!(out, "She said \u{201C}hi. \u{2E22}x\u{2E25} there\u{201D}");
 	}
 
 	#[aidoku_test]
@@ -307,12 +316,8 @@ mod tests {
 		// Every block table holds asymmetric pairs of prose characters
 		// only — symmetric quotes are left out everywhere because `"`
 		// and `'` cannot tell an opener from a closer.
-		for table in [
-			BASIC_LATIN_PAIRS,
-			LATIN_1_PAIRS,
-			GENERAL_PUNCTUATION_PAIRS,
-		] {
-			for &(open, close) in *table {
+		for table in [BASIC_LATIN_PAIRS, LATIN_1_PAIRS, GENERAL_PUNCTUATION_PAIRS] {
+			for &(open, close) in table.iter() {
 				assert_ne!(open, close, "symmetric pair: {open}");
 				assert!(is_prose_char(open) && is_prose_char(close));
 			}
