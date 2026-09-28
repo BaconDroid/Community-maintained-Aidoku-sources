@@ -245,7 +245,7 @@ mod tests {
 		let out = strip(
 			"Rosalyn profoundly asked\\.  \n\
 			 \u{1D4B7}\u{1D4BB}\u{1D4EE}\u{1D4EE}\u{1D66C}\u{1D4E2}\u{1D483}\u{1D48F}\
-			 \u{1D4F8}\u{1D66B}\u{1D4EE}\u{1D661}\\.\\u{1D4EC}\\u{1D4F8}\\u{1D4EE}\n\n",
+			 \u{1D4F8}\u{1D66B}\u{1D4EE}\u{1D661}\\.\u{1D4EC}\u{1D4F8}\u{1D4EE}\n\n",
 		);
 		assert_eq!(out, "Rosalyn profoundly asked\\.");
 	}
@@ -257,12 +257,12 @@ mod tests {
 		// the credit goes.
 		let out = strip(
 			"The aura of fire\\! \u{1D627}\u{1D45F}\u{1D452}\u{1D638}\u{1D4B7}\
-			 \u{1D4C3}\u{1D45C}\u{1D4CB}\u{1D4C1}\\.\\u{1D4B8}\\u{1D45E}\n\n",
+			 \u{1D4C3}\u{1D45C}\u{1D4CB}\u{1D4C1}\\.\u{1D4B8}\u{1D45E}\n\n",
 		);
 		assert_eq!(out, "The aura of fire\\!");
 		let out = strip(
-			"The rumbling sounded different from before\\.\\u{1D65B}\\u{1D45F}\
-			 \u{1D452}\\u{1D638}\\u{1D5EF}\\u{1D62F}\\u{1D5FC}\\u{1D603}\\u{1D484}\\u{1D490}\n\n",
+			"The rumbling sounded different from before\\.\u{1D65B}\u{1D45F}\
+			 \u{1D452}\u{1D638}\u{1D5EF}\u{1D62F}\u{1D5FC}\u{1D603}\u{1D484}\u{1D490}\n\n",
 		);
 		assert_eq!(out, "The rumbling sounded different from before\\.");
 	}
