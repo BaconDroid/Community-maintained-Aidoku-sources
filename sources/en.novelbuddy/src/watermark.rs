@@ -127,7 +127,7 @@ fn append_block(output: &mut String, block: &str) {
 				let Some(end) = head.rfind(['.', '!', '?']) else {
 					continue;
 				};
-				let mut fixed = String::from(&head[..end + 1]);
+				let mut fixed = String::from(&head[..=end]);
 				let mut rest = &line[end + 1..];
 				let mut open = unbalanced(&fixed);
 				while let Some(opener) = open.last() {

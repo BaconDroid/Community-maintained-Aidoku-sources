@@ -11,7 +11,7 @@ pub fn hidden_genres() -> Vec<String> {
 }
 
 pub fn hide_watermark() -> bool {
-	defaults_get::<bool>(HIDE_WATERMARK_KEY).unwrap_or(true)
+	defaults_get::<bool>(HIDE_WATERMARK_KEY).unwrap_or(false)
 }
 
 pub fn reset_hidden_genres() {
