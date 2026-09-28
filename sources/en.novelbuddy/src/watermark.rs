@@ -122,13 +122,23 @@ fn append_block(output: &mut String, block: &str) {
 			None => kept.push(line.into()),
 			Some(index) => {
 				// No sentence end in front of the credit means the line
-				// is the credit, so there is nothing worth keeping.
+				// is the credit, so there is nothing worth keeping. `…`
+				// ends sentences in these translations as often as `.`
+				// does; `;` `:` `—` do not, so they stay out.
 				let head = &line[..index];
-				let Some(end) = head.rfind(['.', '!', '?']) else {
+				// `end` is the byte index where the terminator starts; the
+				// slice has to cover it whole because `…` is three bytes.
+				let Some(start) = head.rfind(['.', '!', '?', '…']) else {
 					continue;
 				};
-				let mut fixed = String::from(&head[..=end]);
-				let mut rest = &line[end + 1..];
+				let end = start
+					+ head[start..]
+						.chars()
+						.next()
+						.map(|ch| ch.len_utf8())
+						.unwrap_or(1);
+				let mut fixed = String::from(&head[..end]);
+				let mut rest = &line[end..];
 				let mut open = unbalanced(&fixed);
 				while let Some(opener) = open.last() {
 					if let Some(close) = extend_close(*opener) {
@@ -265,6 +275,15 @@ mod tests {
 			 \u{1D452}\u{1D638}\u{1D5EF}\u{1D62F}\u{1D5FC}\u{1D603}\u{1D484}\u{1D490}\n\n",
 		);
 		assert_eq!(out, "The rumbling sounded different from before\\.");
+	}
+
+	#[aidoku_test]
+	fn cuts_at_an_ellipsis_like_at_a_full_stop() {
+		// `…` ends sentences in these translations as often as `.` does,
+		// so it cuts the same way. `;` `:` `—` do not end sentences and
+		// stay out of the cut on purpose.
+		let out = strip("She trailed off\u{2026} \u{2E22}x\u{2E25} end\n\n");
+		assert_eq!(out, "She trailed off\u{2026}");
 	}
 
 	#[aidoku_test]
