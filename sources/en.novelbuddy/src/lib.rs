@@ -46,7 +46,7 @@ fn mtl_mode(filters: &[FilterValue]) -> &'static str {
 			return match value.as_str() {
 				"only" => "only",
 				"hidden" => "hidden",
-				_ => "all",
+				_ => break,
 			};
 		}
 	}
