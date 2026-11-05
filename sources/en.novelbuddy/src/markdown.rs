@@ -24,7 +24,7 @@ fn escape_line(line: &str) -> String {
 	let mut escaped = String::default();
 	escaped.push_str(indent);
 	for (index, character) in trimmed.char_indices() {
-		if Some(index) == marker || matches!(character, '<' | '>') {
+		if Some(index) == marker || character == '<' {
 			escaped.push('\\');
 		}
 		escaped.push(character);
