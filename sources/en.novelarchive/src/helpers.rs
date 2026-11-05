@@ -48,20 +48,32 @@ pub fn parse_status(value: &str) -> MangaStatus {
 }
 
 pub fn content_rating(tags: &[String]) -> ContentRating {
-	if tags.iter().any(|tag| is_mature_signal(tag)) {
+	if tags.iter().any(|tag| is_explicit_signal(tag)) {
+		ContentRating::NSFW
+	} else if tags.iter().any(|tag| is_suggestive_signal(tag)) {
 		ContentRating::Suggestive
 	} else {
 		ContentRating::Safe
 	}
 }
 
-fn is_mature_signal(value: &str) -> bool {
+fn is_explicit_signal(value: &str) -> bool {
 	let value = value.trim();
-	value.eq_ignore_ascii_case("mature")
-		|| value.eq_ignore_ascii_case("mature themes")
-		|| value.eq_ignore_ascii_case("adult")
-		|| value.eq_ignore_ascii_case("ecchi")
+	value.eq_ignore_ascii_case("adult")
+		|| value.eq_ignore_ascii_case("mature")
 		|| value.eq_ignore_ascii_case("smut")
+		|| value.eq_ignore_ascii_case("erotica")
+		|| value.eq_ignore_ascii_case("explicit")
+		|| value.eq_ignore_ascii_case("pornographic")
+		|| value.eq_ignore_ascii_case("r-18")
+		|| value.eq_ignore_ascii_case("r18")
+}
+
+fn is_suggestive_signal(value: &str) -> bool {
+	let value = value.trim();
+	value.eq_ignore_ascii_case("ecchi")
+		|| value.eq_ignore_ascii_case("mature themes")
+		|| value.eq_ignore_ascii_case("suggestive")
 }
 
 impl From<Novel> for Manga {
@@ -163,9 +175,17 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn marks_mature_genres_suggestive() {
+	fn marks_mature_genres_by_strength() {
 		assert!(matches!(
-			content_rating(&["Action".to_string(), "Mature".to_string()]),
+			content_rating(&["Action".to_string(), "Adult".to_string()]),
+			ContentRating::NSFW
+		));
+		assert!(matches!(
+			content_rating(&["Mature".to_string()]),
+			ContentRating::NSFW
+		));
+		assert!(matches!(
+			content_rating(&["Ecchi".to_string()]),
 			ContentRating::Suggestive
 		));
 		assert!(matches!(

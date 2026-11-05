@@ -91,17 +91,12 @@ impl Source for NovelArchive {
 			manga.copy_from(novel.into());
 			if needs_chapters {
 				send_partial_result(&manga);
-				if let Some(chapters) = chapters.filter(|chapters| !chapters.is_empty()) {
-					manga.chapters = Some(chapters);
-				}
+				manga.chapters = chapters;
 			}
 		} else if needs_chapters {
 			let url = format!("{BASE_URL}/api/novels/{}", manga.key);
 			let data: NovelDetailData = request(&url)?;
-			let chapters = build_chapters(&data.novel.id, data.novel.chapter_names);
-			if !chapters.is_empty() {
-				manga.chapters = Some(chapters);
-			}
+			manga.chapters = Some(build_chapters(&data.novel.id, data.novel.chapter_names));
 		}
 		Ok(manga)
 	}
@@ -144,18 +139,23 @@ impl ListingProvider for NovelArchive {
 
 impl DeepLinkHandler for NovelArchive {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
-		let Some((path, query)) = url.split_once('?') else {
+		let Some((base, query)) = url.split_once('?') else {
 			return Ok(None);
 		};
-		let path = path
-			.rsplit("novelarchive.st")
-			.next()
-			.unwrap_or_default()
-			.trim_end_matches('/');
+		let path = [
+			"https://novelarchive.st/",
+			"http://novelarchive.st/",
+			"https://www.novelarchive.st/",
+			"http://www.novelarchive.st/",
+		]
+		.iter()
+		.find_map(|prefix| base.strip_prefix(prefix))
+		.map(|path| path.trim_end_matches('/'))
+		.unwrap_or_default();
 		let query = query.split('#').next().unwrap_or_default();
 
 		match path {
-			"/novel" => {
+			"novel" => {
 				let Some(id) = query_param(query, "id") else {
 					return Ok(None);
 				};
@@ -164,7 +164,7 @@ impl DeepLinkHandler for NovelArchive {
 				}
 				Ok(Some(DeepLinkResult::Manga { key: id.into() }))
 			}
-			"/reader" => {
+			"reader" => {
 				let (Some(id), Some(chapter)) =
 					(query_param(query, "novel"), query_param(query, "chapter"))
 				else {
@@ -245,10 +245,22 @@ mod tests {
 		assert_eq!(pages.len(), 1);
 		match &pages[0].content {
 			PageContent::Text(text) => {
-				assert!(!text.is_empty(), "expected non-empty chapter text");
+				assert_ne!(text, "(empty chapter)", "chapter body was empty");
+				assert!(text.len() > 500, "expected a full chapter body");
 			}
 			_ => panic!("expected PageContent::Text"),
 		}
+	}
+
+	#[aidoku_test]
+	fn deep_link_ignores_foreign_hosts() {
+		let source = NovelArchive;
+		let result = source
+			.handle_deep_link(format!(
+				"https://notnovelarchive.st/novel?id={SHADOW_SLAVE_KEY}"
+			))
+			.expect("deep link failed");
+		assert!(result.is_none(), "expected no deep link for a foreign host");
 	}
 
 	#[aidoku_test]
