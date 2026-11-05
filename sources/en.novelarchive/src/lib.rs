@@ -9,10 +9,12 @@ use aidoku::{
 };
 
 mod helpers;
+mod markdown;
 mod models;
 mod settings;
+mod watermark;
 
-use helpers::{build_chapters, chapter_text, query_param, request};
+use helpers::{build_chapters, query_param, request};
 use models::{ChapterDetailData, ListData, ListingData, NovelDetailData};
 
 pub const BASE_URL: &str = "https://novelarchive.st";
@@ -115,8 +117,14 @@ impl Source for NovelArchive {
 			manga.key, chapter.key
 		);
 		let data: ChapterDetailData = request(&url)?;
+		let text = markdown::html_to_markdown(data.chapter.content.as_deref().unwrap_or_default());
+		let text = if text.is_empty() {
+			"(empty chapter)".to_string()
+		} else {
+			text
+		};
 		Ok(vec![Page {
-			content: PageContent::text(chapter_text(data.chapter)),
+			content: PageContent::text(text),
 			..Default::default()
 		}])
 	}

@@ -6,7 +6,7 @@ use aidoku::{
 };
 use serde::de::DeserializeOwned;
 
-use crate::models::{ChapterDetail, Novel};
+use crate::models::Novel;
 use crate::{BASE_URL, USER_AGENT};
 
 pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
@@ -117,13 +117,6 @@ pub fn build_chapters(novel_id: &str, names: Vec<String>) -> Vec<Chapter> {
 			}
 		})
 		.collect()
-}
-
-pub fn chapter_text(chapter: ChapterDetail) -> String {
-	match chapter.content {
-		Some(content) if !content.trim().is_empty() => content,
-		_ => "(empty chapter)".to_string(),
-	}
 }
 
 pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {

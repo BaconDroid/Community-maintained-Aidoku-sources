@@ -96,5 +96,17 @@
 			}
 		],
 		"footer": "Novels tagged with the selected genres are excluded from search results."
+	},
+	{
+		"type": "group",
+		"title": "Experimental",
+		"items": [
+			{
+				"type": "switch",
+				"key": "hideWatermark",
+				"title": "Hide Watermark",
+				"default": false
+			}
+		]
 	}
 ]
