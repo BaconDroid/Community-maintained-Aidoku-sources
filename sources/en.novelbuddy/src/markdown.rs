@@ -1,11 +1,47 @@
 use aidoku::{
 	alloc::{String, Vec, string::ToString},
-	helpers::string::PlainText,
 	imports::html::{Element, Html, Kind},
 };
 use core::fmt::Write as _;
 
 use crate::{settings, watermark};
+
+fn escape_markdown_text(text: &str) -> String {
+	let mut output = String::default();
+	for (index, line) in text.replace("\r\n", "\n").split('\n').enumerate() {
+		if index > 0 {
+			output.push_str("  \n");
+		}
+		output.push_str(&escape_line(line));
+	}
+	output
+}
+
+fn escape_line(line: &str) -> String {
+	let trimmed = line.trim_start();
+	let indent = &line[..line.len() - trimmed.len()];
+	let marker = block_marker_escape_index(trimmed);
+	let mut escaped = String::default();
+	escaped.push_str(indent);
+	for (index, character) in trimmed.char_indices() {
+		if Some(index) == marker || character == '<' {
+			escaped.push('\\');
+		}
+		escaped.push(character);
+	}
+	escaped
+}
+
+fn block_marker_escape_index(line: &str) -> Option<usize> {
+	if line.starts_with(['#', '>', '-', '+', '|']) {
+		return Some(0);
+	}
+	let digits = line.chars().take_while(char::is_ascii_digit).count();
+	if digits > 0 && line[digits..].starts_with(['.', ')']) {
+		return Some(digits);
+	}
+	None
+}
 
 fn longest_backtick_run(text: &str) -> usize {
 	let mut longest = 0;
@@ -34,7 +70,7 @@ fn convert_children_to_markdown(element: &Element, output: &mut String) {
 		match node.kind() {
 			Kind::TextNode => {
 				if let Some(text) = node.text() {
-					output.push_str(&text.escape_markdown());
+					output.push_str(&escape_markdown_text(&text));
 				}
 			}
 			Kind::Element => {
@@ -242,15 +278,15 @@ mod tests {
 		let cases = [
 			(
 				"<p>A <strong>bold</strong>, <em>italic</em>, <u>underlined</u>, and <del>gone</del>.</p>",
-				"A **bold**\\, *italic*\\, underlined\\, and gone\\.",
+				"A **bold**, *italic*, underlined, and gone.",
 			),
 			(
 				"<p><u>underlined</u>, <del>gone</del>, <s>struck</s>, <sup>2</sup>, <ruby>kanji<rt>kana</rt></ruby></p>",
-				"underlined\\, gone\\, struck\\, 2\\, kanjikana",
+				"underlined, gone, struck, 2, kanjikana",
 			),
 			(
 				"<p>Tom &amp; Jerry &mdash; use *literal*, _text_, and ~~this~~</p>",
-				"Tom \\& Jerry — use \\*literal\\*\\, \\_text\\_\\, and \\~\\~this\\~\\~",
+				"Tom & Jerry — use *literal*, _text_, and ~~this~~",
 			),
 			(
 				"<p><strong> bold </strong> and <em> italic </em></p>",
@@ -285,7 +321,7 @@ mod tests {
 			("<div>text in div</div>", "text in div"),
 			(
 				"<div> Chapter 218: Ather’s Perspective\n<p> He woke up as he always did.</p></div>",
-				"Chapter 218\\: Ather’s Perspective  \n\n He woke up as he always did\\.",
+				"Chapter 218: Ather’s Perspective  \n\n He woke up as he always did.",
 			),
 			("<div>first</div><div>second</div>", "first\n\nsecond"),
 			("<ul><li>a</li><li>b</li></ul>", "- a\n- b"),
