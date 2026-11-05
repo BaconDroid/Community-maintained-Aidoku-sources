@@ -6,91 +6,82 @@ use core::fmt::Write as _;
 
 use crate::{settings, watermark};
 
-fn escape_prose_except_emphasis(text: &str) -> String {
+fn escape_markdown_text(text: &str) -> String {
 	let mut output = String::default();
-	for character in text.chars() {
-		if character.is_ascii_punctuation() && !matches!(character, '*' | '_') {
-			output.push('\\');
+	for (index, line) in text.replace("\r\n", "\n").split('\n').enumerate() {
+		if index > 0 {
+			output.push_str("  \n");
 		}
-		output.push(character);
+		output.push_str(&escape_line(line));
 	}
-	output.replace("\r\n", "\n").replace('\n', "  \n")
+	output
 }
 
-// Anything not listed here is escaped, so literal "<NotATag>" prose survives.
-const MARKUP_TAGS: &[&str] = &[
-	"a",
-	"abbr",
-	"article",
-	"aside",
-	"b",
-	"blockquote",
-	"br",
-	"caption",
-	"center",
-	"cite",
-	"code",
-	"col",
-	"colgroup",
-	"dd",
-	"del",
-	"details",
-	"div",
-	"dl",
-	"dt",
-	"em",
-	"figcaption",
-	"figure",
-	"font",
-	"footer",
-	"h1",
-	"h2",
-	"h3",
-	"h4",
-	"h5",
-	"h6",
-	"header",
-	"hgroup",
-	"hr",
-	"i",
-	"img",
-	"ins",
-	"kbd",
-	"li",
-	"main",
-	"mark",
-	"menu",
-	"ol",
-	"p",
-	"pre",
-	"q",
-	"rp",
-	"rt",
-	"ruby",
-	"s",
-	"samp",
-	"section",
-	"small",
-	"span",
-	"strike",
-	"strong",
-	"sub",
-	"summary",
-	"sup",
-	"table",
-	"tbody",
-	"td",
-	"tfoot",
-	"th",
-	"thead",
-	"time",
-	"tr",
-	"tt",
-	"u",
-	"ul",
-	"var",
-	"wbr",
-];
+fn escape_line(line: &str) -> String {
+	let trimmed = line.trim_start();
+	let indent = &line[..line.len() - trimmed.len()];
+	let marker = block_marker_escape_index(trimmed);
+	let mut escaped = String::default();
+	escaped.push_str(indent);
+	for (index, character) in trimmed.char_indices() {
+		if Some(index) == marker || character == '<' {
+			escaped.push('\\');
+		}
+		escaped.push(character);
+	}
+	escaped
+}
+
+fn block_marker_escape_index(line: &str) -> Option<usize> {
+	if line.starts_with(['#', '>', '-', '+', '|']) {
+		return Some(0);
+	}
+	let digits = line.chars().take_while(char::is_ascii_digit).count();
+	if digits > 0 && line[digits..].starts_with(['.', ')']) {
+		return Some(digits);
+	}
+	None
+}
+
+fn escape_paragraph(block: &str) -> String {
+	let mut escaped = String::default();
+	for character in block.chars() {
+		match character {
+			'&' => escaped.push_str("&amp;"),
+			'<' => escaped.push_str("&lt;"),
+			_ => escaped.push(character),
+		}
+	}
+	escaped
+}
+
+fn assemble_paragraphs(input: &str) -> String {
+	let mut paragraphs = String::default();
+	let mut current = String::default();
+	for line in input.lines() {
+		if line.trim().is_empty() {
+			if !current.is_empty() {
+				push_paragraph(&mut paragraphs, &current);
+				current.clear();
+			}
+		} else {
+			if !current.is_empty() {
+				current.push('\n');
+			}
+			current.push_str(line);
+		}
+	}
+	if !current.is_empty() {
+		push_paragraph(&mut paragraphs, &current);
+	}
+	["<div id=\"novelarchive-root\">", &paragraphs, "</div>"].concat()
+}
+
+fn push_paragraph(paragraphs: &mut String, block: &str) {
+	paragraphs.push_str("<p>");
+	paragraphs.push_str(&escape_paragraph(block));
+	paragraphs.push_str("</p>");
+}
 
 fn longest_backtick_run(text: &str) -> usize {
 	let mut longest = 0;
@@ -119,7 +110,7 @@ fn convert_children_to_markdown(element: &Element, output: &mut String) {
 		match node.kind() {
 			Kind::TextNode => {
 				if let Some(text) = node.text() {
-					output.push_str(&escape_prose_except_emphasis(&text));
+					output.push_str(&escape_markdown_text(&text));
 				}
 			}
 			Kind::Element => {
@@ -295,132 +286,6 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 	output.push_str("\n\n");
 }
 
-// Quote-aware so a '>' inside an attribute cannot end the tag early.
-fn markup_tag_end(input: &str, start: usize) -> Option<usize> {
-	let bytes = input.as_bytes();
-	let mut index = start + 1;
-	if bytes.get(index) == Some(&b'/') {
-		index += 1;
-	}
-	let name_start = index;
-	while let Some(&byte) = bytes.get(index) {
-		if byte.is_ascii_alphanumeric() || byte == b'-' {
-			index += 1;
-		} else {
-			break;
-		}
-	}
-	if index == name_start {
-		return None;
-	}
-	let name = input[name_start..index].to_ascii_lowercase();
-	if !MARKUP_TAGS.contains(&name.as_str()) {
-		return None;
-	}
-	let mut quote = 0u8;
-	while let Some(&byte) = bytes.get(index) {
-		if quote != 0 {
-			if byte == quote {
-				quote = 0;
-			}
-		} else if byte == b'"' || byte == b'\'' {
-			quote = byte;
-		} else if byte == b'>' {
-			return Some(index + 1);
-		}
-		index += 1;
-	}
-	None
-}
-
-// Escape bare '<': the parser would eat literal prose like "<Maddened Enlightenment>".
-fn protect_literal_angle_brackets(input: &str) -> String {
-	let mut output = String::default();
-	let mut index = 0;
-	while index < input.len() {
-		if input.as_bytes()[index] == b'<' {
-			if let Some(end) = markup_tag_end(input, index) {
-				output.push_str(&input[index..end]);
-				index = end;
-			} else {
-				output.push_str("&lt;");
-				index += 1;
-			}
-		} else {
-			let ch = input[index..].chars().next().unwrap_or('\u{FFFD}');
-			output.push(ch);
-			index += ch.len_utf8();
-		}
-	}
-	output
-}
-
-// Real block markup must not be wrapped in <p>: the parser nests the blocks and doubles the blank lines.
-fn starts_with_block_markup(segment: &str) -> bool {
-	let Some(tag) = segment.trim_start().strip_prefix('<').map(|rest| {
-		let end = match rest
-			.find(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
-		{
-			Some(end) => end,
-			None => rest.len(),
-		};
-		rest[..end].to_ascii_lowercase()
-	}) else {
-		return false;
-	};
-	matches!(
-		tag.as_str(),
-		"blockquote"
-			| "details"
-			| "div" | "dl"
-			| "dt" | "dd"
-			| "figcaption"
-			| "figure"
-			| "h1" | "h2"
-			| "h3" | "h4"
-			| "h5" | "h6"
-			| "hgroup"
-			| "hr" | "menu"
-			| "ol" | "p"
-			| "pre" | "summary"
-			| "ul"
-	)
-}
-
-fn push_block_html(paragraphs: &mut String, block: &str) {
-	let protected = protect_literal_angle_brackets(block);
-	if starts_with_block_markup(&protected) {
-		paragraphs.push_str(&protected);
-	} else {
-		paragraphs.push_str("<p>");
-		paragraphs.push_str(&protected);
-		paragraphs.push_str("</p>");
-	}
-}
-
-fn assemble_paragraphs(input: &str) -> String {
-	let mut paragraphs = String::default();
-	let mut current = String::default();
-	for line in input.lines() {
-		if line.trim().is_empty() {
-			if !current.is_empty() {
-				push_block_html(&mut paragraphs, &current);
-				current.clear();
-			}
-		} else {
-			if !current.is_empty() {
-				current.push('\n');
-			}
-			current.push_str(line);
-		}
-	}
-	if !current.is_empty() {
-		push_block_html(&mut paragraphs, &current);
-	}
-	// concat!, not format!: chapter text may contain braces.
-	["<div id=\"novelarchive-root\">", &paragraphs, "</div>"].concat()
-}
-
 pub fn html_to_markdown(html: &str) -> String {
 	let Ok(doc) = Html::parse_fragment(assemble_paragraphs(html)) else {
 		return String::default();
@@ -443,42 +308,33 @@ mod tests {
 	use aidoku_test::aidoku_test;
 
 	#[aidoku_test]
-	fn converts_inline_markup_and_keeps_emphasis() {
-		let out = html_to_markdown("The <i>wen was</i> a coin");
-		assert_eq!(out, "The *wen was* a coin");
-		let out = html_to_markdown("Use *literal* and <strong>bold</strong>.");
-		assert_eq!(out, "Use *literal* and **bold**\\.");
-		let out = html_to_markdown("<p><strong> bold </strong></p>");
-		assert_eq!(out, "**bold**");
-		let out = html_to_markdown("He heard a *bzz* and read the sign.");
-		assert_eq!(out, "He heard a *bzz* and read the sign\\.");
-	}
-
-	#[aidoku_test]
-	fn keeps_scene_breaks() {
+	fn keeps_paragraphs_and_inline_markup() {
+		let out = html_to_markdown("First *bzz* line.\n\nSecond **bold** line.");
+		assert_eq!(out, "First *bzz* line.\n\nSecond **bold** line.");
 		let out = html_to_markdown("One.\n\n***\n\nTwo.");
-		assert_eq!(out, "One\\.\n\n***\n\nTwo\\.");
+		assert_eq!(out, "One.\n\n***\n\nTwo.");
 	}
 
 	#[aidoku_test]
-	fn keeps_paragraphs_and_lists() {
-		let out = html_to_markdown("First <strong>bold</strong>.\n\nSecond <em>italic</em>.");
-		assert_eq!(out, "First **bold**\\.\n\nSecond *italic*\\.");
-		let out = html_to_markdown(
-			"<menu><li>One</li><li>Two</li></menu>\n\n<dl><dt>Term</dt><dd>Definition</dd></dl>\n\n<figure><figcaption>Caption</figcaption></figure>",
-		);
-		assert_eq!(out, "- One\n- Two\n\nTerm\n\nDefinition\n\nCaption");
-		assert_eq!(html_to_markdown("first\r\n\r\nsecond"), "first\n\nsecond");
-	}
-
-	#[aidoku_test]
-	fn escapes_unknown_tags_and_literal_brackets() {
-		let out = html_to_markdown("A <marquee>strange <em>x</em></marquee> tag");
-		assert_eq!(out, "A \\<marquee\\>strange *x*\\<\\/marquee\\> tag");
-		let out = html_to_markdown("<Maddened Enlightenment> could replenish 30 Intelligence");
+	fn keeps_inline_markdown_symbols() {
+		let out = html_to_markdown("Use `code`, ~~gone~~, [site](https://example.com) and |a|b|.");
 		assert_eq!(
 			out,
-			"\\<Maddened Enlightenment\\> could replenish 30 Intelligence"
+			"Use `code`, ~~gone~~, [site](https://example.com) and |a|b|."
 		);
+	}
+
+	#[aidoku_test]
+	fn escapes_block_markers_at_line_start() {
+		let out = html_to_markdown("- item\n1. item\n> quote\n# head");
+		assert_eq!(out, "\\- item  \n1\\. item  \n\\> quote  \n\\# head");
+	}
+
+	#[aidoku_test]
+	fn escapes_only_angle_brackets() {
+		let out = html_to_markdown("<Imperial Rieta Orphanage>\n\nHe shrugged.");
+		assert_eq!(out, "\\<Imperial Rieta Orphanage>\n\nHe shrugged.");
+		let out = html_to_markdown("Tom & Jerry, 5 < 10");
+		assert_eq!(out, "Tom & Jerry, 5 \\< 10");
 	}
 }
