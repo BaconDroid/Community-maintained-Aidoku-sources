@@ -24,7 +24,7 @@ fn escape_line(line: &str) -> String {
 	let mut escaped = String::default();
 	escaped.push_str(indent);
 	for (index, character) in trimmed.char_indices() {
-		if Some(index) == marker || matches!(character, '<' | '>') {
+		if Some(index) == marker || character == '<' {
 			escaped.push('\\');
 		}
 		escaped.push(character);
@@ -336,8 +336,8 @@ mod tests {
 	#[aidoku_test]
 	fn escapes_angle_brackets() {
 		let out = html_to_markdown("<Imperial Rieta Orphanage>\n\nHe shrugged.");
-		assert_eq!(out, "\\<Imperial Rieta Orphanage\\>\n\nHe shrugged.");
+		assert_eq!(out, "\\<Imperial Rieta Orphanage>\n\nHe shrugged.");
 		let out = html_to_markdown("Tom & Jerry, 5 < 10 and a > b");
-		assert_eq!(out, "Tom & Jerry, 5 \\< 10 and a \\> b");
+		assert_eq!(out, "Tom & Jerry, 5 \\< 10 and a > b");
 	}
 }
