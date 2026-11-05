@@ -1,7 +1,7 @@
 #![no_std]
 use aidoku::{
 	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, NotificationHandler, Page, PageContent, Result, Source,
+	MangaPageResult, Page, PageContent, Result, Source,
 	alloc::{String, Vec, string::ToString, vec},
 	helpers::uri::QueryParameters,
 	imports::std::send_partial_result,
@@ -60,11 +60,6 @@ impl Source for NovelArchive {
 
 		if let Some(query) = query.as_deref() {
 			qs.push("search", Some(query));
-		}
-
-		let hidden = settings::hidden_genres();
-		if !hidden.is_empty() {
-			qs.push("genres_exclude", Some(&hidden.join(",")));
 		}
 
 		let url = format!("{BASE_URL}/api/novels?{qs}");
@@ -188,20 +183,7 @@ impl DeepLinkHandler for NovelArchive {
 	}
 }
 
-impl NotificationHandler for NovelArchive {
-	fn handle_notification(&self, notification: String) {
-		if notification == "resetGenreFilter" {
-			settings::reset_hidden_genres();
-		}
-	}
-}
-
-register_source!(
-	NovelArchive,
-	ListingProvider,
-	DeepLinkHandler,
-	NotificationHandler
-);
+register_source!(NovelArchive, ListingProvider, DeepLinkHandler);
 
 #[cfg(test)]
 mod tests {
