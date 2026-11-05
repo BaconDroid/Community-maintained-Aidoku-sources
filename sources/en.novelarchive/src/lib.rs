@@ -111,7 +111,7 @@ impl Source for NovelArchive {
 			manga.key, chapter.key
 		);
 		let data: ChapterDetailData = request(&url)?;
-		let text = markdown::text_to_markdown(data.chapter.content.as_deref().unwrap_or_default());
+		let text = markdown::html_to_markdown(data.chapter.content.as_deref().unwrap_or_default());
 		let text = if text.is_empty() {
 			"(empty chapter)".to_string()
 		} else {
