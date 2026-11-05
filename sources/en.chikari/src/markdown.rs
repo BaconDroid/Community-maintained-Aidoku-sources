@@ -20,16 +20,24 @@ fn escape_markdown_text(text: &str) -> String {
 fn escape_line(line: &str) -> String {
 	let trimmed = line.trim_start();
 	let indent = &line[..line.len() - trimmed.len()];
-	let block_marker = trimmed.starts_with(['#', '-', '+', '|']);
+	let marker = ordered_marker_escape_index(trimmed);
 	let mut escaped = String::default();
 	escaped.push_str(indent);
 	for (index, character) in trimmed.char_indices() {
-		if (index == 0 && block_marker) || matches!(character, '<' | '>') {
+		if Some(index) == marker || matches!(character, '<' | '>') {
 			escaped.push('\\');
 		}
 		escaped.push(character);
 	}
 	escaped
+}
+
+fn ordered_marker_escape_index(line: &str) -> Option<usize> {
+	let digits = line.chars().take_while(char::is_ascii_digit).count();
+	if digits > 0 && line[digits..].starts_with(['.', ')']) {
+		return Some(digits);
+	}
+	None
 }
 
 fn escape_paragraph(block: &str) -> String {
@@ -314,15 +322,15 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn keeps_ordered_lists_as_prose() {
+	fn escapes_ordered_lists_into_prose() {
 		let out = html_to_markdown("1. The Beginning\n2) Next");
-		assert_eq!(out, "1. The Beginning  \n2) Next");
+		assert_eq!(out, "1\\. The Beginning  \n2\\) Next");
 	}
 
 	#[aidoku_test]
-	fn escapes_block_markers_at_line_start() {
+	fn keeps_line_start_markdown() {
 		let out = html_to_markdown("- item\n+ item\n# head\n| cell");
-		assert_eq!(out, "\\- item  \n\\+ item  \n\\# head  \n\\| cell");
+		assert_eq!(out, "- item  \n+ item  \n# head  \n| cell");
 	}
 
 	#[aidoku_test]

@@ -20,16 +20,24 @@ fn escape_markdown_text(text: &str) -> String {
 fn escape_line(line: &str) -> String {
 	let trimmed = line.trim_start();
 	let indent = &line[..line.len() - trimmed.len()];
-	let block_marker = trimmed.starts_with(['#', '-', '+', '|']);
+	let marker = ordered_marker_escape_index(trimmed);
 	let mut escaped = String::default();
 	escaped.push_str(indent);
 	for (index, character) in trimmed.char_indices() {
-		if (index == 0 && block_marker) || matches!(character, '<' | '>') {
+		if Some(index) == marker || matches!(character, '<' | '>') {
 			escaped.push('\\');
 		}
 		escaped.push(character);
 	}
 	escaped
+}
+
+fn ordered_marker_escape_index(line: &str) -> Option<usize> {
+	let digits = line.chars().take_while(char::is_ascii_digit).count();
+	if digits > 0 && line[digits..].starts_with(['.', ')']) {
+		return Some(digits);
+	}
+	None
 }
 
 fn longest_backtick_run(text: &str) -> usize {
