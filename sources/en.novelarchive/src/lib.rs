@@ -39,7 +39,7 @@ impl Source for NovelArchive {
 	) -> Result<MangaPageResult> {
 		let mut qs = QueryParameters::new();
 		let mut sort = "recent";
-		let mut status = "all".to_string();
+		let mut status: Option<String> = None;
 
 		for filter in filters {
 			match filter {
@@ -48,10 +48,14 @@ impl Source for NovelArchive {
 						sort = value;
 					}
 				}
-				FilterValue::Select { id, value } if id == "status" => status = value,
+				FilterValue::Select { id, value } if id == "status" => status = Some(value),
 				_ => {}
 			}
 		}
+
+		let status = status
+			.filter(|value| value != "all")
+			.unwrap_or_else(settings::status);
 
 		qs.push("sort", Some(sort));
 		qs.push("status", Some(&status));
@@ -107,7 +111,7 @@ impl Source for NovelArchive {
 			manga.key, chapter.key
 		);
 		let data: ChapterDetailData = request(&url)?;
-		let text = markdown::html_to_markdown(data.chapter.content.as_deref().unwrap_or_default());
+		let text = markdown::text_to_markdown(data.chapter.content.as_deref().unwrap_or_default());
 		let text = if text.is_empty() {
 			"(empty chapter)".to_string()
 		} else {
@@ -247,6 +251,14 @@ mod tests {
 			PageContent::Text(text) => {
 				assert_ne!(text, "(empty chapter)", "chapter body was empty");
 				assert!(text.len() > 500, "expected a full chapter body");
+				assert!(
+					text.contains("\n\n***\n\n"),
+					"scene break should stay markdown, not be escaped"
+				);
+				assert!(
+					!text.contains("\\*"),
+					"emphasis markers should not be escaped"
+				);
 			}
 			_ => panic!("expected PageContent::Text"),
 		}
