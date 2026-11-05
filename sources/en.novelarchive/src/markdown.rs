@@ -8,7 +8,7 @@ use crate::{settings, watermark};
 
 fn escape_markdown_text(text: &str) -> String {
 	let mut output = String::default();
-	for (index, line) in text.replace("\r\n", "\n").split('\n').enumerate() {
+	for (index, line) in text.lines().enumerate() {
 		if index > 0 {
 			output.push_str("  \n");
 		}
