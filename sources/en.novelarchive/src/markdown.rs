@@ -20,27 +20,16 @@ fn escape_markdown_text(text: &str) -> String {
 fn escape_line(line: &str) -> String {
 	let trimmed = line.trim_start();
 	let indent = &line[..line.len() - trimmed.len()];
-	let marker = block_marker_escape_index(trimmed);
+	let block_marker = trimmed.starts_with(['#', '-', '+', '|']);
 	let mut escaped = String::default();
 	escaped.push_str(indent);
 	for (index, character) in trimmed.char_indices() {
-		if Some(index) == marker || character == '<' {
+		if (index == 0 && block_marker) || matches!(character, '<' | '>') {
 			escaped.push('\\');
 		}
 		escaped.push(character);
 	}
 	escaped
-}
-
-fn block_marker_escape_index(line: &str) -> Option<usize> {
-	if line.starts_with(['#', '>', '-', '+', '|']) {
-		return Some(0);
-	}
-	let digits = line.chars().take_while(char::is_ascii_digit).count();
-	if digits > 0 && line[digits..].starts_with(['.', ')']) {
-		return Some(digits);
-	}
-	None
 }
 
 fn escape_paragraph(block: &str) -> String {
@@ -325,16 +314,22 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn escapes_block_markers_at_line_start() {
-		let out = html_to_markdown("- item\n1. item\n> quote\n# head");
-		assert_eq!(out, "\\- item  \n1\\. item  \n\\> quote  \n\\# head");
+	fn keeps_ordered_lists_as_prose() {
+		let out = html_to_markdown("1. The Beginning\n2) Next");
+		assert_eq!(out, "1. The Beginning  \n2) Next");
 	}
 
 	#[aidoku_test]
-	fn escapes_only_angle_brackets() {
+	fn escapes_block_markers_at_line_start() {
+		let out = html_to_markdown("- item\n+ item\n# head\n| cell");
+		assert_eq!(out, "\\- item  \n\\+ item  \n\\# head  \n\\| cell");
+	}
+
+	#[aidoku_test]
+	fn escapes_angle_brackets() {
 		let out = html_to_markdown("<Imperial Rieta Orphanage>\n\nHe shrugged.");
-		assert_eq!(out, "\\<Imperial Rieta Orphanage>\n\nHe shrugged.");
-		let out = html_to_markdown("Tom & Jerry, 5 < 10");
-		assert_eq!(out, "Tom & Jerry, 5 \\< 10");
+		assert_eq!(out, "\\<Imperial Rieta Orphanage\\>\n\nHe shrugged.");
+		let out = html_to_markdown("Tom & Jerry, 5 < 10 and a > b");
+		assert_eq!(out, "Tom & Jerry, 5 \\< 10 and a \\> b");
 	}
 }
