@@ -8,7 +8,7 @@ use crate::{settings, watermark};
 
 fn escape_markdown_text(text: &str) -> String {
 	let mut output = String::default();
-	for (index, line) in text.replace("\r\n", "\n").split('\n').enumerate() {
+	for (index, line) in text.lines().enumerate() {
 		if index > 0 {
 			output.push_str("  \n");
 		}
@@ -310,7 +310,7 @@ mod tests {
 			("<div>text in div</div>", "text in div"),
 			(
 				"<div> Chapter 218: Ather’s Perspective\n<p> He woke up as he always did.</p></div>",
-				"Chapter 218: Ather’s Perspective  \n\n He woke up as he always did.",
+				"Chapter 218: Ather’s Perspective\n\n He woke up as he always did.",
 			),
 			("<div>first</div><div>second</div>", "first\n\nsecond"),
 			("<ul><li>a</li><li>b</li></ul>", "- a\n- b"),
