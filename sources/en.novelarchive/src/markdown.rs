@@ -348,9 +348,12 @@ fn protect_literal_angle_brackets(input: &str) -> String {
 // Real block markup must not be wrapped in <p>: the parser nests the blocks and doubles the blank lines.
 fn starts_with_block_markup(segment: &str) -> bool {
 	let Some(tag) = segment.trim_start().strip_prefix('<').map(|rest| {
-		let end = rest
+		let end = match rest
 			.find(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
-			.unwrap_or(rest.len());
+		{
+			Some(end) => end,
+			None => rest.len(),
+		};
 		rest[..end].to_ascii_lowercase()
 	}) else {
 		return false;
