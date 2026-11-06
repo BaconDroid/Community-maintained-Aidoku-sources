@@ -444,7 +444,7 @@ pub fn valid_number(value: &str) -> bool {
 }
 
 pub fn body_to_text(body: String) -> Result<String> {
-	let text = crate::markdown::html_to_markdown(&body);
+	let text = crate::markdown::to_markdown(&body);
 	if text.is_empty() {
 		bail!("Chikari returned an empty chapter");
 	}
