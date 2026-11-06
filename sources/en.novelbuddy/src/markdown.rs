@@ -326,10 +326,22 @@ mod tests {
 				"A **bold**, *italic*, underlined, and gone.",
 			),
 			(
+				"<p><u>underlined</u>, <del>gone</del>, <s>struck</s>, <sup>2</sup>, <ruby>kanji<rt>kana</rt></ruby></p>",
+				"underlined, gone, struck, 2, kanjikana",
+			),
+			(
+				"<p>Tom &amp; Jerry &mdash; use *literal*, _text_, and ~~this~~</p>",
+				"Tom & Jerry — use *literal*, _text_, and ~~this~~",
+			),
+			(
 				"<p><strong> bold </strong> and <em> italic </em></p>",
 				"**bold** and *italic*",
 			),
 			("<p>Hello <span>world</span> end</p>", "Hello world end"),
+			(
+				"<p>Line one <b>bold</b> line two</p>",
+				"Line one **bold** line two",
+			),
 		];
 		for (html, expected) in cases {
 			assert_eq!(to_markdown(html), expected);
@@ -347,6 +359,19 @@ mod tests {
 				"<h2>Chapter 1</h2><p>First<br>second</p><p>Third</p>",
 				"## Chapter 1\n\nFirst  \nsecond\n\nThird",
 			),
+			(
+				"<div style=\"margin:0;padding:0;border:0;font-size:0;line-height:0\"></div><div> </div><p>Real content</p>",
+				"Real content",
+			),
+			("<div>text in div</div>", "text in div"),
+			(
+				"<div> Chapter 218: Ather's Perspective\n<p> He woke up as he always did.</p></div>",
+				"Chapter 218: Ather's Perspective\n\n He woke up as he always did.",
+			),
+			("<div>first</div><div>second</div>", "first\n\nsecond"),
+			("<ul><li>a</li><li>b</li></ul>", "- a\n- b"),
+			("<ol><li>a</li><p>note</p><li>b</li></ol>", "1. a\n2. b"),
+			("<blockquote>cite</blockquote>", "> cite"),
 			(
 				"<blockquote><p>one</p><p>two</p></blockquote>",
 				"> one\n> \n> two",
