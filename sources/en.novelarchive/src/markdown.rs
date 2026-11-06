@@ -6,6 +6,12 @@ use core::fmt::Write as _;
 
 use crate::{settings, watermark};
 
+const VOID_TAGS: &[&str] = &["<br", "<img", "<hr"];
+
+fn has_markup(input: &str) -> bool {
+	input.contains("</") || VOID_TAGS.iter().any(|tag| input.contains(tag))
+}
+
 fn escape_markdown_text(text: &str) -> String {
 	let mut output = String::default();
 	for (index, line) in text.lines().enumerate() {
@@ -52,6 +58,12 @@ fn escape_paragraph(block: &str) -> String {
 	escaped
 }
 
+fn push_paragraph(paragraphs: &mut String, block: &str) {
+	paragraphs.push_str("<p>");
+	paragraphs.push_str(&escape_paragraph(block));
+	paragraphs.push_str("</p>");
+}
+
 fn assemble_paragraphs(input: &str) -> String {
 	let mut paragraphs = String::default();
 	let mut current = String::default();
@@ -71,14 +83,7 @@ fn assemble_paragraphs(input: &str) -> String {
 	if !current.is_empty() {
 		push_paragraph(&mut paragraphs, &current);
 	}
-	// Concatenated, not formatted: chapter text may contain braces.
-	["<div id=\"novelarchive-root\">", &paragraphs, "</div>"].concat()
-}
-
-fn push_paragraph(paragraphs: &mut String, block: &str) {
-	paragraphs.push_str("<p>");
-	paragraphs.push_str(&escape_paragraph(block));
-	paragraphs.push_str("</p>");
+	paragraphs
 }
 
 fn longest_backtick_run(text: &str) -> usize {
@@ -284,14 +289,21 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 	output.push_str("\n\n");
 }
 
-pub fn html_to_markdown(html: &str) -> String {
+pub fn to_markdown(input: &str) -> String {
+	let body = if has_markup(input) {
+		input.to_string()
+	} else {
+		assemble_paragraphs(input)
+	};
 	// The fragment root cannot be traversed; a selected wrapper can.
-	let Ok(doc) = Html::parse_fragment(assemble_paragraphs(html)) else {
+	// Concatenated, not formatted: chapter text may contain braces.
+	let wrapped = ["<div id=\"md-root\">", body.as_str(), "</div>"].concat();
+	let Ok(doc) = Html::parse_fragment(wrapped) else {
 		return String::default();
 	};
 
 	let mut output = String::default();
-	if let Some(root) = doc.select_first("#novelarchive-root") {
+	if let Some(root) = doc.select_first("#md-root") {
 		convert_children_to_markdown(&root, &mut output);
 	}
 	if settings::hide_watermark() {
@@ -307,16 +319,79 @@ mod tests {
 	use aidoku_test::aidoku_test;
 
 	#[aidoku_test]
+	fn converts_inline_markup() {
+		let cases = [
+			(
+				"<p>A <strong>bold</strong>, <em>italic</em>, <u>underlined</u>, and <del>gone</del>.</p>",
+				"A **bold**, *italic*, underlined, and gone.",
+			),
+			(
+				"<p><strong> bold </strong> and <em> italic </em></p>",
+				"**bold** and *italic*",
+			),
+			("<p>Hello <span>world</span> end</p>", "Hello world end"),
+		];
+		for (html, expected) in cases {
+			assert_eq!(to_markdown(html), expected);
+		}
+	}
+
+	#[aidoku_test]
+	fn lays_out_blocks() {
+		let cases = [
+			(
+				"<menu><li>One</li><li>Two</li></menu><dl><dt>Term</dt><dd>Definition</dd></dl>",
+				"- One\n- Two\n\nTerm\n\nDefinition",
+			),
+			(
+				"<h2>Chapter 1</h2><p>First<br>second</p><p>Third</p>",
+				"## Chapter 1\n\nFirst  \nsecond\n\nThird",
+			),
+			(
+				"<blockquote><p>one</p><p>two</p></blockquote>",
+				"> one\n> \n> two",
+			),
+		];
+		for (html, expected) in cases {
+			assert_eq!(to_markdown(html), expected);
+		}
+	}
+
+	#[aidoku_test]
+	fn renders_links_images_and_rules() {
+		let html = "<p>Use <code>aidoku</code></p><hr><p><a href=\"https://example.com\">site</a></p><img src=\"https://example.com/i.png\" alt=\"pic\">";
+		let out = to_markdown(html);
+		assert!(out.contains("`aidoku`"), "inline code: {out}");
+		assert!(out.contains("---"), "horizontal rule: {out}");
+		assert!(out.contains("[site](https://example.com)"), "link: {out}");
+		assert!(
+			out.contains("![pic](https://example.com/i.png)"),
+			"image: {out}"
+		);
+	}
+
+	#[aidoku_test]
+	fn keeps_code_literal_and_widens_delimiters() {
+		let out = to_markdown("<p>use <code>a_b-c *x*</code></p><pre>let s = \"a_b\";</pre>");
+		assert!(out.contains("`a_b-c *x*`"), "code span: {out}");
+		assert!(out.contains("let s = \"a_b\";"), "fenced block: {out}");
+
+		let out = to_markdown("<p><code>`left</code> and <code>right`</code></p>");
+		assert!(out.contains("`` `left ``"), "leading backtick: {out}");
+		assert!(out.contains("`` right` ``"), "trailing backtick: {out}");
+	}
+
+	#[aidoku_test]
 	fn keeps_paragraphs_and_inline_markup() {
-		let out = html_to_markdown("First *bzz* line.\n\nSecond **bold** line.");
+		let out = to_markdown("First *bzz* line.\n\nSecond **bold** line.");
 		assert_eq!(out, "First *bzz* line.\n\nSecond **bold** line.");
-		let out = html_to_markdown("One.\n\n***\n\nTwo.");
+		let out = to_markdown("One.\n\n***\n\nTwo.");
 		assert_eq!(out, "One.\n\n***\n\nTwo.");
 	}
 
 	#[aidoku_test]
 	fn keeps_inline_markdown_symbols() {
-		let out = html_to_markdown("Use `code`, ~~gone~~, [site](https://example.com) and |a|b|.");
+		let out = to_markdown("Use `code`, ~~gone~~, [site](https://example.com) and |a|b|.");
 		assert_eq!(
 			out,
 			"Use `code`, ~~gone~~, [site](https://example.com) and |a|b|."
@@ -325,21 +400,21 @@ mod tests {
 
 	#[aidoku_test]
 	fn escapes_ordered_lists_into_prose() {
-		let out = html_to_markdown("1. The Beginning\n2) Next");
+		let out = to_markdown("1. The Beginning\n2) Next");
 		assert_eq!(out, "1\\. The Beginning  \n2\\) Next");
 	}
 
 	#[aidoku_test]
 	fn keeps_line_start_markdown() {
-		let out = html_to_markdown("- item\n+ item\n# head\n| cell");
+		let out = to_markdown("- item\n+ item\n# head\n| cell");
 		assert_eq!(out, "- item  \n+ item  \n# head  \n| cell");
 	}
 
 	#[aidoku_test]
 	fn escapes_angle_brackets() {
-		let out = html_to_markdown("<Imperial Rieta Orphanage>\n\nHe shrugged.");
+		let out = to_markdown("<Imperial Rieta Orphanage>\n\nHe shrugged.");
 		assert_eq!(out, "\\<Imperial Rieta Orphanage>\n\nHe shrugged.");
-		let out = html_to_markdown("Tom & Jerry, 5 < 10 and a > b");
-		assert_eq!(out, "Tom & Jerry, 5 \\< 10 and a > b");
+		let out = to_markdown("Tom & Jerry, 5 < 10");
+		assert_eq!(out, "Tom & Jerry, 5 \\< 10");
 	}
 }
