@@ -373,7 +373,7 @@ mod tests {
 			("<ol><li>a</li><p>note</p><li>b</li></ol>", "1. a\n2. b"),
 			("<blockquote>cite</blockquote>", "> cite"),
 			(
-				"<blockquote><p>one</p><p>two</p></blockquote>",
+				"\n<blockquote><p>one</p><p>two</p></blockquote>",
 				"> one\n> \n> two",
 			),
 		];
@@ -383,7 +383,7 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn renders_links_images_and_rules() {
+	fn renders_links_images_rules_and_code() {
 		let html = "<p>Use <code>aidoku</code></p><hr><p><a href=\"https://example.com\">site</a></p><img src=\"https://example.com/i.png\" alt=\"pic\">";
 		let out = to_markdown(html);
 		assert!(out.contains("`aidoku`"), "inline code: {out}");
@@ -393,10 +393,7 @@ mod tests {
 			out.contains("![pic](https://example.com/i.png)"),
 			"image: {out}"
 		);
-	}
 
-	#[aidoku_test]
-	fn keeps_code_literal_and_widens_delimiters() {
 		let out = to_markdown("<p>use <code>a_b-c *x*</code></p><pre>let s = \"a_b\";</pre>");
 		assert!(out.contains("`a_b-c *x*`"), "code span: {out}");
 		assert!(out.contains("let s = \"a_b\";"), "fenced block: {out}");
@@ -407,36 +404,24 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn keeps_paragraphs_and_inline_markup() {
+	fn keeps_markdown_the_text_carries() {
 		let out = to_markdown("First *bzz* line.\n\nSecond **bold** line.");
 		assert_eq!(out, "First *bzz* line.\n\nSecond **bold** line.");
 		let out = to_markdown("One.\n\n***\n\nTwo.");
 		assert_eq!(out, "One.\n\n***\n\nTwo.");
-	}
-
-	#[aidoku_test]
-	fn keeps_inline_markdown_symbols() {
 		let out = to_markdown("Use `code`, ~~gone~~, [site](https://example.com) and |a|b|.");
 		assert_eq!(
 			out,
 			"Use `code`, ~~gone~~, [site](https://example.com) and |a|b|."
 		);
-	}
-
-	#[aidoku_test]
-	fn escapes_ordered_lists_into_prose() {
-		let out = to_markdown("1. The Beginning\n2) Next");
-		assert_eq!(out, "1\\. The Beginning  \n2\\) Next");
-	}
-
-	#[aidoku_test]
-	fn keeps_line_start_markdown() {
 		let out = to_markdown("- item\n+ item\n# head\n| cell");
 		assert_eq!(out, "- item  \n+ item  \n# head  \n| cell");
 	}
 
 	#[aidoku_test]
-	fn escapes_angle_brackets() {
+	fn escapes_what_would_change_structure() {
+		let out = to_markdown("1. The Beginning\n2) Next");
+		assert_eq!(out, "1\\. The Beginning  \n2\\) Next");
 		let out = to_markdown("<Imperial Rieta Orphanage>\n\nHe shrugged.");
 		assert_eq!(out, "\\<Imperial Rieta Orphanage>\n\nHe shrugged.");
 		let out = to_markdown("Tom & Jerry, 5 < 10");
