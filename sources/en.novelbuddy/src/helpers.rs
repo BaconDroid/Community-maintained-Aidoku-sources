@@ -70,7 +70,7 @@ fn content_rating(is_adult: bool, tags: &[String]) -> ContentRating {
 }
 
 fn is_suggestive_signal(value: &str) -> bool {
-	const SUGGESTIVE_TAGS: &[&str] = &["adult", "bl", "ecchi", "gl", "smut"];
+	const SUGGESTIVE_TAGS: &[&str] = &["adult", "bl", "ecchi", "smut"];
 	SUGGESTIVE_TAGS
 		.iter()
 		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
