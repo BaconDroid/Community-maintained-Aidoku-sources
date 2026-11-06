@@ -98,6 +98,13 @@ impl Source for NovelBuddy {
 		}
 		qs.push("page", Some(&page.to_string()));
 
+		let mtl = settings::mtl_mode();
+		if mtl == "only" {
+			qs.push("is_mtl", Some("true"));
+		} else if mtl == "hidden" {
+			qs.push("is_mtl", Some("false"));
+		}
+
 		if let Some(q) = query.as_deref() {
 			qs.push("q", Some(q));
 		}
