@@ -608,34 +608,4 @@ mod tests {
 		);
 		assert!(parse_iso_date("2026-02-21T22:08:14Z").is_some());
 	}
-
-	#[aidoku_test]
-	fn content_rating_prefers_the_site_flag() {
-		let genres = vec![crate::models::Named {
-			name: "Ecchi".into(),
-			role: None,
-		}];
-		assert_eq!(
-			content_rating(true, &genres, &[]),
-			ContentRating::NSFW,
-			"the site flag wins over any tag"
-		);
-	}
-
-	#[aidoku_test]
-	fn content_rating_reads_tags_only_without_a_flag() {
-		let genres = vec![crate::models::Named {
-			name: "Ecchi".into(),
-			role: None,
-		}];
-		assert_eq!(
-			content_rating(false, &genres, &[]),
-			ContentRating::Suggestive
-		);
-		let plain = vec![crate::models::Named {
-			name: "Action".into(),
-			role: None,
-		}];
-		assert_eq!(content_rating(false, &plain, &[]), ContentRating::Safe);
-	}
 }

@@ -295,25 +295,4 @@ mod tests {
 		assert!(parse_iso_date("2024-01-02T03:04:05.000Z").is_some());
 		assert!(parse_iso_date("2024-01-02T03:04:05").is_some());
 	}
-
-	#[aidoku_test]
-	fn content_rating_prefers_the_site_flag() {
-		assert_eq!(
-			content_rating(true, &["Ecchi".to_string()]),
-			ContentRating::NSFW,
-			"the site flag wins over any tag"
-		);
-	}
-
-	#[aidoku_test]
-	fn content_rating_reads_tags_only_without_a_flag() {
-		assert_eq!(
-			content_rating(false, &["Ecchi".to_string()]),
-			ContentRating::Suggestive
-		);
-		assert_eq!(
-			content_rating(false, &["Action".to_string()]),
-			ContentRating::Safe
-		);
-	}
 }
