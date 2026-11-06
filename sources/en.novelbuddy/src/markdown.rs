@@ -60,7 +60,7 @@ fn append_raw_text(element: &Element, output: &mut String) {
 	}
 }
 
-// Text nodes only via `child_nodes`, tag names only via `children`.
+// Element-kind nodes pair with the next children entry.
 fn convert_children_to_markdown(element: &Element, output: &mut String) {
 	let mut elements = element.children();
 	for node in element.child_nodes() {
@@ -114,7 +114,6 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 		Some("em" | "i") => "*",
 		_ => "",
 	};
-	// Keep surrounding whitespace outside the markers: `** bold **` is not emphasis.
 	output.push_str(marker);
 	output.push_str(trimmed);
 	output.push_str(marker);
@@ -127,7 +126,7 @@ fn convert_inline_code(element: &Element, output: &mut String) {
 	for _ in 0..ticks {
 		output.push('`');
 	}
-	// Space-pad content touching a delimiter boundary; CommonMark strips it back.
+	// CommonMark strips one padding space: pad content touching the fence.
 	if raw.starts_with('`') || raw.ends_with('`') {
 		output.push(' ');
 		output.push_str(&raw);
@@ -203,7 +202,6 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 			break_before_block(output);
 			output.push_str("---\n\n")
 		}
-		// menu is the unordered-list alternative.
 		"ul" | "ol" | "menu" => convert_list_to_markdown(element, &tag, output),
 		"blockquote" => convert_blockquote_to_markdown(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
@@ -213,7 +211,6 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 	}
 }
 
-// Filter to `li` before enumerating so stray markup cannot shift the sequence.
 fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
 	break_before_block(output);
 	let items: Vec<_> = element
@@ -247,9 +244,9 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 }
 
 pub fn html_to_markdown(html: &str) -> String {
-	// The fragment root cannot be traversed; a selected wrapper can.
-	// Concatenated, not formatted: content may contain format placeholders.
+	// Concatenated, not formatted: chapter text may contain braces.
 	let wrapped = ["<div id=\"nb-root\">", html, "</div>"].concat();
+	// The fragment root cannot be traversed; a selected wrapper can.
 	let Ok(doc) = Html::parse_fragment(wrapped) else {
 		return String::default();
 	};
@@ -367,5 +364,39 @@ mod tests {
 			out.contains("![pic](https://example.com/i.png)"),
 			"image: {out}"
 		);
+	}
+
+	#[aidoku_test]
+	fn keeps_paragraphs_and_inline_markup() {
+		let out = html_to_markdown("<p>First *bzz* line.</p><p>Second **bold** line.</p>");
+		assert_eq!(out, "First *bzz* line.\n\nSecond **bold** line.");
+	}
+
+	#[aidoku_test]
+	fn keeps_inline_markdown_symbols() {
+		let out =
+			html_to_markdown("<p>Use `code`, ~~gone~~, [site](https://example.com) and |a|b|.</p>");
+		assert_eq!(
+			out,
+			"Use `code`, ~~gone~~, [site](https://example.com) and |a|b|."
+		);
+	}
+
+	#[aidoku_test]
+	fn escapes_ordered_lists_into_prose() {
+		let out = html_to_markdown("<p>1. The Beginning</p><p>2) Next</p>");
+		assert_eq!(out, "1\\. The Beginning\n\n2\\) Next");
+	}
+
+	#[aidoku_test]
+	fn keeps_line_start_markdown() {
+		let out = html_to_markdown("<p>- item</p><p>+ item</p><p># head</p><p>| cell</p>");
+		assert_eq!(out, "- item\n\n+ item\n\n# head\n\n| cell");
+	}
+
+	#[aidoku_test]
+	fn escapes_angle_brackets() {
+		let out = html_to_markdown("<p>5 &lt; 10 and a &gt; b</p><p>&lt;Nom&gt;</p>");
+		assert_eq!(out, "5 \\< 10 and a > b\n\n\\<Nom>");
 	}
 }
