@@ -58,6 +58,24 @@ impl From<TitleListItem> for Manga {
 	}
 }
 
+fn content_rating(is_adult: bool, tags: &[String]) -> ContentRating {
+	if is_adult {
+		return ContentRating::NSFW;
+	}
+	if tags.iter().any(|tag| is_suggestive_signal(tag)) {
+		ContentRating::Suggestive
+	} else {
+		ContentRating::Safe
+	}
+}
+
+fn is_suggestive_signal(value: &str) -> bool {
+	const SUGGESTIVE_TAGS: &[&str] = &["adult", "bl", "ecchi", "gl", "smut"];
+	SUGGESTIVE_TAGS
+		.iter()
+		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
+}
+
 impl From<TitleDetail> for Manga {
 	fn from(detail: TitleDetail) -> Self {
 		let url = detail.slug.as_deref().map(|s| format!("{BASE_URL}/{s}"));
@@ -79,11 +97,7 @@ impl From<TitleDetail> for Manga {
 				tags.push(tag);
 			}
 		}
-		let rating = if detail.is_adult {
-			ContentRating::NSFW
-		} else {
-			ContentRating::Safe
-		};
+		let rating = content_rating(detail.is_adult, &tags);
 		Manga {
 			key: detail.id,
 			title: detail.name,
@@ -280,5 +294,26 @@ mod tests {
 	fn parses_timestamps_without_zone_via_fallback() {
 		assert!(parse_iso_date("2024-01-02T03:04:05.000Z").is_some());
 		assert!(parse_iso_date("2024-01-02T03:04:05").is_some());
+	}
+
+	#[aidoku_test]
+	fn content_rating_prefers_the_site_flag() {
+		assert_eq!(
+			content_rating(true, &["Ecchi".to_string()]),
+			ContentRating::NSFW,
+			"the site flag wins over any tag"
+		);
+	}
+
+	#[aidoku_test]
+	fn content_rating_reads_tags_only_without_a_flag() {
+		assert_eq!(
+			content_rating(false, &["Ecchi".to_string()]),
+			ContentRating::Suggestive
+		);
+		assert_eq!(
+			content_rating(false, &["Action".to_string()]),
+			ContentRating::Safe
+		);
 	}
 }

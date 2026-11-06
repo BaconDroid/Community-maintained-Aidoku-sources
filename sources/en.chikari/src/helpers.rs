@@ -323,24 +323,31 @@ pub fn content_rating(
 	if is_nsfw {
 		return ContentRating::NSFW;
 	}
-	let is_mature = genres.iter().any(|genre| is_mature_signal(&genre.name))
-		|| tags.iter().any(|tag| is_mature_signal(&tag.name));
-	if is_mature {
+	let suggestive = genres
+		.iter()
+		.map(|genre| genre.name.as_str())
+		.chain(tags.iter().map(|tag| tag.name.as_str()))
+		.any(is_suggestive_signal);
+	if suggestive {
 		ContentRating::Suggestive
 	} else {
 		ContentRating::Safe
 	}
 }
 
-fn is_mature_signal(value: &str) -> bool {
-	value.eq_ignore_ascii_case("mature")
-		|| value.eq_ignore_ascii_case("r-18")
-		|| value.eq_ignore_ascii_case("r18")
-		|| value.eq_ignore_ascii_case("adult")
-		|| value.eq_ignore_ascii_case("ecchi")
-		|| value.eq_ignore_ascii_case("smut")
-		|| value.eq_ignore_ascii_case("yaoi")
-		|| value.eq_ignore_ascii_case("yuri")
+fn is_suggestive_signal(value: &str) -> bool {
+	const SUGGESTIVE_TAGS: &[&str] = &[
+		"borderline h",
+		"ecchi",
+		"erotica",
+		"lolicon",
+		"mature",
+		"nudity",
+		"shotacon",
+	];
+	SUGGESTIVE_TAGS
+		.iter()
+		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
 }
 
 pub fn parse_status(status: &str) -> MangaStatus {
@@ -600,5 +607,35 @@ mod tests {
 			parse_iso_date("2026-02-21T22:08:14").unwrap()
 		);
 		assert!(parse_iso_date("2026-02-21T22:08:14Z").is_some());
+	}
+
+	#[aidoku_test]
+	fn content_rating_prefers_the_site_flag() {
+		let genres = vec![crate::models::Named {
+			name: "Ecchi".into(),
+			role: None,
+		}];
+		assert_eq!(
+			content_rating(true, &genres, &[]),
+			ContentRating::NSFW,
+			"the site flag wins over any tag"
+		);
+	}
+
+	#[aidoku_test]
+	fn content_rating_reads_tags_only_without_a_flag() {
+		let genres = vec![crate::models::Named {
+			name: "Ecchi".into(),
+			role: None,
+		}];
+		assert_eq!(
+			content_rating(false, &genres, &[]),
+			ContentRating::Suggestive
+		);
+		let plain = vec![crate::models::Named {
+			name: "Action".into(),
+			role: None,
+		}];
+		assert_eq!(content_rating(false, &plain, &[]), ContentRating::Safe);
 	}
 }
