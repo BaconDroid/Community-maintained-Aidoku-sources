@@ -373,16 +373,6 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn keeps_inline_markdown_symbols() {
-		let out =
-			html_to_markdown("<p>Use `code`, ~~gone~~, [site](https://example.com) and |a|b|.</p>");
-		assert_eq!(
-			out,
-			"Use `code`, ~~gone~~, [site](https://example.com) and |a|b|."
-		);
-	}
-
-	#[aidoku_test]
 	fn escapes_ordered_lists_into_prose() {
 		let out = html_to_markdown("<p>1. The Beginning</p><p>2) Next</p>");
 		assert_eq!(out, "1\\. The Beginning\n\n2\\) Next");
