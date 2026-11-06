@@ -58,16 +58,14 @@ pub fn content_rating(tags: &[String]) -> ContentRating {
 }
 
 fn is_nsfw_signal(value: &str) -> bool {
-	const NSFW_TAGS: &[&str] = &["erotica", "nsfw", "r-18", "r18", "smut"];
+	const NSFW_TAGS: &[&str] = &["adult", "erotica", "nsfw", "nudity", "r-18", "r18", "smut"];
 	NSFW_TAGS
 		.iter()
 		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
 }
 
 fn is_suggestive_signal(value: &str) -> bool {
-	const SUGGESTIVE_TAGS: &[&str] = &[
-		"adult", "bl", "ecchi", "gl", "mature", "nudity", "yaoi", "yuri",
-	];
+	const SUGGESTIVE_TAGS: &[&str] = &["bl", "ecchi", "gl", "mature", "yaoi", "yuri"];
 	SUGGESTIVE_TAGS
 		.iter()
 		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
