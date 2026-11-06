@@ -71,6 +71,7 @@ fn assemble_paragraphs(input: &str) -> String {
 	if !current.is_empty() {
 		push_paragraph(&mut paragraphs, &current);
 	}
+	// Concatenated, not formatted: chapter text may contain braces.
 	["<div id=\"novelarchive-root\">", &paragraphs, "</div>"].concat()
 }
 
@@ -284,6 +285,7 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 }
 
 pub fn html_to_markdown(html: &str) -> String {
+	// The fragment root cannot be traversed; a selected wrapper can.
 	let Ok(doc) = Html::parse_fragment(assemble_paragraphs(html)) else {
 		return String::default();
 	};
