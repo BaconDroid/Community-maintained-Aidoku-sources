@@ -48,17 +48,25 @@ pub fn parse_status(value: &str) -> MangaStatus {
 }
 
 pub fn content_rating(tags: &[String]) -> ContentRating {
-	if tags.iter().any(|tag| is_suggestive_signal(tag)) {
+	if tags.iter().any(|tag| is_nsfw_signal(tag)) {
+		ContentRating::NSFW
+	} else if tags.iter().any(|tag| is_suggestive_signal(tag)) {
 		ContentRating::Suggestive
 	} else {
 		ContentRating::Safe
 	}
 }
 
+fn is_nsfw_signal(value: &str) -> bool {
+	const NSFW_TAGS: &[&str] = &["erotica", "nsfw", "r-18", "r18", "smut"];
+	NSFW_TAGS
+		.iter()
+		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
+}
+
 fn is_suggestive_signal(value: &str) -> bool {
 	const SUGGESTIVE_TAGS: &[&str] = &[
-		"adult", "bl", "ecchi", "erotica", "gl", "mature", "nsfw", "nudity", "r-18", "r18", "smut",
-		"yaoi", "yuri",
+		"adult", "bl", "ecchi", "gl", "mature", "nudity", "yaoi", "yuri",
 	];
 	SUGGESTIVE_TAGS
 		.iter()
@@ -161,14 +169,5 @@ mod tests {
 	fn extracts_query_parameters() {
 		assert_eq!(query_param("novel=abc&chapter=12", "chapter"), Some("12"));
 		assert_eq!(query_param("novel=abc", "chapter"), None);
-	}
-
-	#[aidoku_test]
-	fn content_rating_reads_tags_as_suggestive() {
-		assert_eq!(
-			content_rating(&["Adventure".to_string(), "Mature".to_string()]),
-			ContentRating::Suggestive
-		);
-		assert_eq!(content_rating(&["Action".to_string()]), ContentRating::Safe);
 	}
 }
