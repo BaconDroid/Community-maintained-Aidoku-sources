@@ -227,9 +227,9 @@ mod tests {
 		assert!(manga.authors.is_some());
 		assert!(matches!(manga.status, aidoku::MangaStatus::Ongoing));
 		let chapters = manga.chapters.expect("no chapters returned");
-		assert_eq!(chapters.len(), 3234);
+		assert_eq!(chapters.len(), 3235);
 		assert_eq!(chapters.first().map(|c| c.key.as_str()), Some("1"));
-		assert_eq!(chapters.last().map(|c| c.key.as_str()), Some("3234"));
+		assert_eq!(chapters.last().map(|c| c.key.as_str()), Some("3235"));
 	}
 
 	#[aidoku_test]
