@@ -76,6 +76,7 @@ impl Source for NovelBuddy {
 		let mut has_sort = false;
 		let mut chosen_sort: Option<&str> = None;
 		let mut excluded_genres = settings::hidden_genres();
+		let mut included_genres: Vec<String> = Vec::new();
 		let mut status_filter: Vec<String> = Vec::new();
 		let mut content_rating_filter: Vec<String> = Vec::new();
 
@@ -128,7 +129,6 @@ impl Source for NovelBuddy {
 					let included: Vec<String> = included
 						.into_iter()
 						.filter(|genre| {
-							// if a hidden genre is manually included in filters, skip hiding it
 							if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
 								excluded_genres.swap_remove(pos);
 								false
@@ -139,6 +139,7 @@ impl Source for NovelBuddy {
 						.collect();
 					if !included.is_empty() {
 						qs.push("genres", Some(&included.join(",")));
+						included_genres = included;
 					}
 					for genre in excluded {
 						if !excluded_genres.contains(&genre) {
@@ -162,21 +163,19 @@ impl Source for NovelBuddy {
 
 		let hide = settings::hide_mtl() && !query.as_deref().is_some_and(mtl::mentions_mtl);
 
-		let mut all_ratings: Vec<String> = content_rating_filter;
-		for r in persistent_content_rating() {
-			if !all_ratings.contains(&r) {
-				all_ratings.push(r);
-			}
-		}
+		let mut all_ratings: Vec<String> = if content_rating_filter.is_empty() {
+			persistent_content_rating()
+		} else {
+			content_rating_filter
+		};
 		all_ratings.sort();
 		all_ratings.dedup();
 
-		let mut all_statuses: Vec<String> = status_filter;
-		for s in persistent_status() {
-			if !all_statuses.contains(&s) {
-				all_statuses.push(s);
-			}
-		}
+		let mut all_statuses: Vec<String> = if status_filter.is_empty() {
+			persistent_status()
+		} else {
+			status_filter
+		};
 		all_statuses.sort();
 		all_statuses.dedup();
 
@@ -189,6 +188,9 @@ impl Source for NovelBuddy {
 				qs_status.push("sort", chosen_sort.or(Some("popular")));
 				if !excluded_genres.is_empty() {
 					qs_status.push("exclude", Some(&excluded_genres.join(",")));
+				}
+				if !included_genres.is_empty() {
+					qs_status.push("genres", Some(&included_genres.join(",")));
 				}
 				if let Some(q) = query.as_deref() {
 					qs_status.push("q", Some(q));
@@ -217,7 +219,6 @@ impl Source for NovelBuddy {
 				mtl::retain_manga(&mut all_entries);
 			}
 			all_entries = filter_by_rating(all_entries, &all_ratings);
-			all_entries.sort_by_key(|m| m.key.clone());
 			all_entries.dedup_by_key(|m| m.key.clone());
 			return Ok(MangaPageResult {
 				entries: all_entries,
