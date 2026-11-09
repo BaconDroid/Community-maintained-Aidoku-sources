@@ -24,6 +24,161 @@ use settings::{
 
 const CONTENT_RATING_IDS: &[&str] = &["safe", "suggestive", "nsfw"];
 
+struct SearchContext {
+	qs: QueryParameters,
+	chosen_sort: Option<&'static str>,
+	excluded_genres: Vec<String>,
+	included_genres: Vec<String>,
+	status_filter: Vec<String>,
+	content_rating_filter: Vec<String>,
+}
+
+fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
+	let mut qs = QueryParameters::new();
+	let mut has_sort = false;
+	let mut chosen_sort: Option<&'static str> = None;
+	let mut excluded_genres = settings::hidden_genres();
+	let mut included_genres: Vec<String> = Vec::new();
+	let mut status_filter: Vec<String> = Vec::new();
+	let mut content_rating_filter: Vec<String> = Vec::new();
+
+	for filter in filters {
+		match filter {
+			FilterValue::Sort { index, .. } => {
+				if let Some(s) = SORT_IDS.get(index as usize) {
+					qs.push("sort", Some(*s));
+					has_sort = true;
+					chosen_sort = Some(*s);
+				}
+			}
+			FilterValue::MultiSelect {
+				id,
+				included,
+				excluded,
+			} if id == "status" => {
+				let mut selected: Vec<String> = included.clone();
+				if !excluded.is_empty() {
+					let all: Vec<&str> = STATUS_IDS.to_vec();
+					selected = all
+						.iter()
+						.filter(|s| !excluded.contains(&(**s).to_lowercase()))
+						.map(|s| (*s).into())
+						.collect();
+				}
+				status_filter = selected;
+			}
+			FilterValue::MultiSelect {
+				id,
+				included,
+				excluded,
+			} if id == "contentRating" => {
+				let mut selected: Vec<String> = included.clone();
+				if !excluded.is_empty() {
+					let all: Vec<&str> = CONTENT_RATING_IDS.to_vec();
+					selected = all
+						.iter()
+						.filter(|s| !excluded.contains(&(**s).to_lowercase()))
+						.map(|s| (*s).into())
+						.collect();
+				}
+				content_rating_filter = selected;
+			}
+			FilterValue::MultiSelect {
+				id,
+				included,
+				excluded,
+			} if id == "genres" => {
+				let included: Vec<String> = included
+					.into_iter()
+					.filter(|genre| {
+						if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
+							excluded_genres.swap_remove(pos);
+							false
+						} else {
+							true
+						}
+					})
+					.collect();
+				if !included.is_empty() {
+					qs.push("genres", Some(&included.join(",")));
+					included_genres = included;
+				}
+				for genre in excluded {
+					if !excluded_genres.contains(&genre) {
+						excluded_genres.push(genre);
+					}
+				}
+			}
+			_ => {}
+		}
+	}
+
+	if !has_sort {
+		qs.push("sort", Some("popular"));
+	}
+	if !excluded_genres.is_empty() {
+		qs.push("exclude", Some(&excluded_genres.join(",")));
+	}
+
+	SearchContext {
+		qs,
+		chosen_sort,
+		excluded_genres,
+		included_genres,
+		status_filter,
+		content_rating_filter,
+	}
+}
+
+fn build_search_url(
+	ctx: &SearchContext,
+	query: Option<&str>,
+	page: i32,
+	status: Option<&str>,
+) -> String {
+	let mut qs = ctx.qs.clone();
+	if let Some(q) = query {
+		qs.push("q", Some(q));
+	}
+	if let Some(s) = status {
+		qs.push("status", Some(s));
+	}
+	format!("{API_URL}/titles/search?{qs}&page={}", page.max(1))
+}
+
+fn build_status_search_url(
+	ctx: &SearchContext,
+	query: Option<&str>,
+	page: i32,
+	status: &str,
+) -> String {
+	let mut qs = QueryParameters::new();
+	qs.push("sort", ctx.chosen_sort.or(Some("popular")));
+	if !ctx.excluded_genres.is_empty() {
+		qs.push("exclude", Some(&ctx.excluded_genres.join(",")));
+	}
+	if !ctx.included_genres.is_empty() {
+		qs.push("genres", Some(&ctx.included_genres.join(",")));
+	}
+	if let Some(q) = query {
+		qs.push("q", Some(q));
+	}
+	qs.push("status", Some(status));
+	qs.set("page", Some(&page.max(1).to_string()));
+	format!("{API_URL}/titles/search?{qs}")
+}
+
+fn merge_with_persistent<T: Eq + Ord + Clone>(runtime: &[T], persistent: Vec<T>) -> Vec<T> {
+	if runtime.is_empty() {
+		persistent
+	} else {
+		let mut merged = runtime.to_vec();
+		merged.sort();
+		merged.dedup();
+		merged
+	}
+}
+
 pub const BASE_URL: &str = "https://novelbuddy.me";
 pub const API_URL: &str = "https://api.novelbuddy.me";
 pub const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 \
@@ -59,6 +214,50 @@ fn filter_by_rating(entries: Vec<Manga>, ratings: &[String]) -> Vec<Manga> {
 		.collect()
 }
 
+fn fetch_multi_status(
+	ctx: &SearchContext,
+	query: Option<&str>,
+	page: i32,
+	all_statuses: &[String],
+	all_ratings: &[String],
+	hide: bool,
+) -> Result<MangaPageResult> {
+	let mut all_entries: Vec<Manga> = Vec::new();
+	let mut any_has_next = false;
+	let mut success_count = 0usize;
+
+	for status in all_statuses {
+		let url = build_status_search_url(ctx, query, page, status);
+		if let Ok(list_data) = request::<ListData>(&url) {
+			let mut filtered: Vec<Manga> = list_data
+				.items
+				.into_iter()
+				.filter(|item| item.status.as_deref() == Some(&**status))
+				.map(Manga::from)
+				.collect();
+			if list_data.pagination.has_next {
+				any_has_next = true;
+			}
+			all_entries.append(&mut filtered);
+			success_count += 1;
+		}
+	}
+
+	if all_entries.is_empty() && success_count == 0 {
+		bail!("all status requests failed");
+	}
+
+	if hide {
+		mtl::retain_manga(&mut all_entries);
+	}
+	let mut entries = filter_by_rating(all_entries, all_ratings);
+	entries.dedup_by_key(|m| m.key.clone());
+	Ok(MangaPageResult {
+		entries,
+		has_next_page: any_has_next,
+	})
+}
+
 struct NovelBuddy;
 
 impl Source for NovelBuddy {
@@ -72,162 +271,26 @@ impl Source for NovelBuddy {
 		page: i32,
 		filters: Vec<FilterValue>,
 	) -> Result<MangaPageResult> {
-		let mut qs = QueryParameters::new();
-		let mut has_sort = false;
-		let mut chosen_sort: Option<&str> = None;
-		let mut excluded_genres = settings::hidden_genres();
-		let mut included_genres: Vec<String> = Vec::new();
-		let mut status_filter: Vec<String> = Vec::new();
-		let mut content_rating_filter: Vec<String> = Vec::new();
-
-		for filter in filters {
-			match filter {
-				FilterValue::Sort { index, .. } => {
-					if let Some(s) = SORT_IDS.get(index as usize) {
-						qs.push("sort", Some(*s));
-						has_sort = true;
-						chosen_sort = Some(*s);
-					}
-				}
-				FilterValue::MultiSelect {
-					id,
-					included,
-					excluded,
-				} if id == "status" => {
-					let mut selected: Vec<String> = included.clone();
-					if !excluded.is_empty() {
-						let all: Vec<&str> = STATUS_IDS.to_vec();
-						selected = all
-							.iter()
-							.filter(|s| !excluded.contains(&(**s).to_lowercase()))
-							.map(|s| (*s).into())
-							.collect();
-					}
-					status_filter = selected;
-				}
-				FilterValue::MultiSelect {
-					id,
-					included,
-					excluded,
-				} if id == "contentRating" => {
-					let mut selected: Vec<String> = included.clone();
-					if !excluded.is_empty() {
-						let all: Vec<&str> = CONTENT_RATING_IDS.to_vec();
-						selected = all
-							.iter()
-							.filter(|s| !excluded.contains(&(**s).to_lowercase()))
-							.map(|s| (*s).into())
-							.collect();
-					}
-					content_rating_filter = selected;
-				}
-				FilterValue::MultiSelect {
-					id,
-					included,
-					excluded,
-				} if id == "genres" => {
-					let included: Vec<String> = included
-						.into_iter()
-						.filter(|genre| {
-							if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
-								excluded_genres.swap_remove(pos);
-								false
-							} else {
-								true
-							}
-						})
-						.collect();
-					if !included.is_empty() {
-						qs.push("genres", Some(&included.join(",")));
-						included_genres = included;
-					}
-					for genre in excluded {
-						if !excluded_genres.contains(&genre) {
-							excluded_genres.push(genre);
-						}
-					}
-				}
-				_ => {}
-			}
-		}
-
-		if !has_sort {
-			qs.push("sort", Some("popular"));
-		}
-		if !excluded_genres.is_empty() {
-			qs.push("exclude", Some(&excluded_genres.join(",")));
-		}
-		if let Some(q) = query.as_deref() {
-			qs.push("q", Some(q));
-		}
-
+		let ctx = parse_filters(filters);
 		let hide = settings::hide_mtl() && !query.as_deref().is_some_and(mtl::mentions_mtl);
 
-		let mut all_ratings: Vec<String> = if content_rating_filter.is_empty() {
-			persistent_content_rating()
-		} else {
-			content_rating_filter
-		};
-		all_ratings.sort();
-		all_ratings.dedup();
-
-		let mut all_statuses: Vec<String> = if status_filter.is_empty() {
-			persistent_status()
-		} else {
-			status_filter
-		};
-		all_statuses.sort();
-		all_statuses.dedup();
+		let all_ratings =
+			merge_with_persistent(&ctx.content_rating_filter, persistent_content_rating());
+		let all_statuses = merge_with_persistent(&ctx.status_filter, persistent_status());
 
 		if all_statuses.len() > 1 {
-			let mut all_entries: Vec<Manga> = Vec::new();
-			let mut any_has_next = false;
-			let mut success_count = 0usize;
-			for status in &all_statuses {
-				let mut qs_status = QueryParameters::new();
-				qs_status.push("sort", chosen_sort.or(Some("popular")));
-				if !excluded_genres.is_empty() {
-					qs_status.push("exclude", Some(&excluded_genres.join(",")));
-				}
-				if !included_genres.is_empty() {
-					qs_status.push("genres", Some(&included_genres.join(",")));
-				}
-				if let Some(q) = query.as_deref() {
-					qs_status.push("q", Some(q));
-				}
-				qs_status.push("status", Some(status));
-				qs_status.set("page", Some(&page.max(1).to_string()));
-				let url = format!("{API_URL}/titles/search?{qs_status}");
-				if let Ok(list_data) = request::<ListData>(&url) {
-					let mut filtered: Vec<Manga> = list_data
-						.items
-						.into_iter()
-						.filter(|item| item.status.as_deref() == Some(status))
-						.map(Manga::from)
-						.collect();
-					if list_data.pagination.has_next {
-						any_has_next = true;
-					}
-					all_entries.append(&mut filtered);
-					success_count += 1;
-				}
-			}
-			if all_entries.is_empty() && success_count == 0 {
-				bail!("all status requests failed");
-			}
-			if hide {
-				mtl::retain_manga(&mut all_entries);
-			}
-			all_entries = filter_by_rating(all_entries, &all_ratings);
-			all_entries.dedup_by_key(|m| m.key.clone());
-			return Ok(MangaPageResult {
-				entries: all_entries,
-				has_next_page: any_has_next,
-			});
-		} else if let Some(status) = all_statuses.first() {
-			qs.push("status", Some(status));
+			return fetch_multi_status(
+				&ctx,
+				query.as_deref(),
+				page,
+				&all_statuses,
+				&all_ratings,
+				hide,
+			);
 		}
-		let url = format!("{API_URL}/titles/search?{qs}&page={}", page.max(1));
+
+		let status = all_statuses.first().map(|s| s.as_str());
+		let url = build_search_url(&ctx, query.as_deref(), page, status);
 		let data: ListData = request(&url)?;
 		let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
 		if hide {
@@ -339,22 +402,18 @@ impl DeepLinkHandler for NovelBuddy {
 		if path.is_empty() {
 			return Ok(None);
 		}
-		let mut parts = path.splitn(2, '/');
-		let series_slug = match parts.next() {
-			Some(s) if !s.is_empty() => s,
-			_ => return Ok(None),
-		};
-		let chapter_slug = parts.next();
+		let (series_slug, chapter_slug) = path.split_once('/').unwrap_or((path, ""));
+		if series_slug.is_empty() {
+			return Ok(None);
+		}
 
 		let manga_key = resolve_slug(series_slug)?;
 
-		if let Some(ch_slug) = chapter_slug
-			&& !ch_slug.is_empty()
-		{
+		if !chapter_slug.is_empty() {
 			let chapters = fetch_chapter_list(&manga_key)?;
 			let chapter_key = chapters.into_iter().find_map(|c| {
 				let url = c.url.as_deref().unwrap_or("");
-				if url.ends_with(ch_slug) {
+				if url.ends_with(chapter_slug) {
 					Some(c.key)
 				} else {
 					None
