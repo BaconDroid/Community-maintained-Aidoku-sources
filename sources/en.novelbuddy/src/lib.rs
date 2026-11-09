@@ -1,7 +1,7 @@
 #![no_std]
 use aidoku::{
-	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, PageContent, Result, Source,
+	AidokuError, Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider,
+	Manga, MangaPageResult, Page, PageContent, Result, Source,
 	alloc::{String, Vec, string::ToString, vec},
 	helpers::uri::QueryParameters,
 	imports::std::send_partial_result,
@@ -33,6 +33,22 @@ struct SearchContext {
 	content_rating_filter: Vec<String>,
 }
 
+fn resolve_multi_select(
+	all_options: &[&'static str],
+	included: Vec<String>,
+	excluded: Vec<String>,
+) -> Vec<String> {
+	if excluded.is_empty() {
+		return included;
+	}
+	let lower_excluded: Vec<String> = excluded.iter().map(|e| e.to_lowercase()).collect();
+	all_options
+		.iter()
+		.filter(|s| !lower_excluded.contains(&(**s).to_lowercase()))
+		.map(|s| (*s).into())
+		.collect()
+}
+
 fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 	let mut qs = QueryParameters::new();
 	let mut has_sort = false;
@@ -56,32 +72,15 @@ fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 				included,
 				excluded,
 			} if id == "status" => {
-				let mut selected: Vec<String> = included.clone();
-				if !excluded.is_empty() {
-					let all: Vec<&str> = STATUS_IDS.to_vec();
-					selected = all
-						.iter()
-						.filter(|s| !excluded.contains(&(**s).to_lowercase()))
-						.map(|s| (*s).into())
-						.collect();
-				}
-				status_filter = selected;
+				status_filter = resolve_multi_select(STATUS_IDS, included, excluded);
 			}
 			FilterValue::MultiSelect {
 				id,
 				included,
 				excluded,
 			} if id == "contentRating" => {
-				let mut selected: Vec<String> = included.clone();
-				if !excluded.is_empty() {
-					let all: Vec<&str> = CONTENT_RATING_IDS.to_vec();
-					selected = all
-						.iter()
-						.filter(|s| !excluded.contains(&(**s).to_lowercase()))
-						.map(|s| (*s).into())
-						.collect();
-				}
-				content_rating_filter = selected;
+				content_rating_filter =
+					resolve_multi_select(CONTENT_RATING_IDS, included, excluded);
 			}
 			FilterValue::MultiSelect {
 				id,
@@ -224,26 +223,35 @@ fn fetch_multi_status(
 ) -> Result<MangaPageResult> {
 	let mut all_entries: Vec<Manga> = Vec::new();
 	let mut any_has_next = false;
-	let mut success_count = 0usize;
+	let mut first_error: Option<AidokuError> = None;
 
 	for status in all_statuses {
 		let url = build_status_search_url(ctx, query, page, status);
-		if let Ok(list_data) = request::<ListData>(&url) {
-			let mut filtered: Vec<Manga> = list_data
-				.items
-				.into_iter()
-				.filter(|item| item.status.as_deref() == Some(&**status))
-				.map(Manga::from)
-				.collect();
-			if list_data.pagination.has_next {
-				any_has_next = true;
+		match request::<ListData>(&url) {
+			Ok(list_data) => {
+				let mut filtered: Vec<Manga> = list_data
+					.items
+					.into_iter()
+					.filter(|item| item.status.as_deref() == Some(&**status))
+					.map(Manga::from)
+					.collect();
+				if list_data.pagination.has_next {
+					any_has_next = true;
+				}
+				all_entries.append(&mut filtered);
 			}
-			all_entries.append(&mut filtered);
-			success_count += 1;
+			Err(e) => {
+				if first_error.is_none() {
+					first_error = Some(e);
+				}
+			}
 		}
 	}
 
-	if all_entries.is_empty() && success_count == 0 {
+	if all_entries.is_empty() {
+		if let Some(e) = first_error {
+			return Err(e);
+		}
 		bail!("all status requests failed");
 	}
 
@@ -251,7 +259,15 @@ fn fetch_multi_status(
 		mtl::retain_manga(&mut all_entries);
 	}
 	let mut entries = filter_by_rating(all_entries, all_ratings);
-	entries.dedup_by_key(|m| m.key.clone());
+	let mut seen: Vec<String> = Vec::new();
+	entries.retain(|m| {
+		if seen.contains(&m.key) {
+			false
+		} else {
+			seen.push(m.key.clone());
+			true
+		}
+	});
 	Ok(MangaPageResult {
 		entries,
 		has_next_page: any_has_next,
@@ -413,7 +429,7 @@ impl DeepLinkHandler for NovelBuddy {
 			let chapters = fetch_chapter_list(&manga_key)?;
 			let chapter_key = chapters.into_iter().find_map(|c| {
 				let url = c.url.as_deref().unwrap_or("");
-				if url.ends_with(chapter_slug) {
+				if url.rsplit('/').next() == Some(chapter_slug) {
 					Some(c.key)
 				} else {
 					None
