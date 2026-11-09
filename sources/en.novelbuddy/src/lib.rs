@@ -68,7 +68,7 @@ impl Source for NovelBuddy {
 					if !included.is_empty() {
 						status_filter = included;
 					} else if !excluded.is_empty() {
-						let all: Vec<&str> = &["ongoing", "completed", "hiatus", "cancelled"];
+						let all: Vec<&str> = ["ongoing", "completed", "hiatus", "cancelled"].to_vec();
 						status_filter = all
 							.iter()
 							.filter(|s| !excluded.contains(&(**s).to_lowercase()))
@@ -131,7 +131,7 @@ impl Source for NovelBuddy {
 			let mut all_entries: Vec<Manga> = Vec::new();
 			for status in &all_statuses {
 				let mut qs_status = QueryParameters::new();
-				qs_status.push("sort", if has_sort { "popular" } else { "popular" });
+				qs_status.push("sort", Some("popular"));
 				if !excluded_genres.is_empty() {
 					qs_status.push("exclude", Some(&excluded_genres.join(",")));
 				}
