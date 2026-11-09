@@ -74,6 +74,7 @@ impl Source for NovelBuddy {
 	) -> Result<MangaPageResult> {
 		let mut qs = QueryParameters::new();
 		let mut has_sort = false;
+		let mut chosen_sort: Option<&str> = None;
 		let mut excluded_genres = settings::hidden_genres();
 		let mut status_filter: Vec<String> = Vec::new();
 		let mut content_rating_filter: Vec<String> = Vec::new();
@@ -84,6 +85,7 @@ impl Source for NovelBuddy {
 					if let Some(s) = SORT_IDS.get(index as usize) {
 						qs.push("sort", Some(*s));
 						has_sort = true;
+						chosen_sort = Some(*s);
 					}
 				}
 				FilterValue::MultiSelect {
@@ -180,9 +182,11 @@ impl Source for NovelBuddy {
 
 		if all_statuses.len() > 1 {
 			let mut all_entries: Vec<Manga> = Vec::new();
+			let mut any_has_next = false;
+			let mut success_count = 0usize;
 			for status in &all_statuses {
 				let mut qs_status = QueryParameters::new();
-				qs_status.push("sort", Some("popular"));
+				qs_status.push("sort", chosen_sort.or(Some("popular")));
 				if !excluded_genres.is_empty() {
 					qs_status.push("exclude", Some(&excluded_genres.join(",")));
 				}
@@ -199,8 +203,15 @@ impl Source for NovelBuddy {
 						.filter(|item| item.status.as_deref() == Some(status))
 						.map(Manga::from)
 						.collect();
+					if list_data.pagination.has_next {
+						any_has_next = true;
+					}
 					all_entries.append(&mut filtered);
+					success_count += 1;
 				}
+			}
+			if all_entries.is_empty() && success_count == 0 {
+				bail!("all status requests failed");
 			}
 			if hide {
 				mtl::retain_manga(&mut all_entries);
@@ -210,12 +221,12 @@ impl Source for NovelBuddy {
 			all_entries.dedup_by_key(|m| m.key.clone());
 			return Ok(MangaPageResult {
 				entries: all_entries,
-				has_next_page: false,
+				has_next_page: any_has_next,
 			});
 		} else if let Some(status) = all_statuses.first() {
 			qs.push("status", Some(status));
 		}
-		let url = format!("{API_URL}/titles/search?{qs}");
+		let url = format!("{API_URL}/titles/search?{qs}&page={}", page.max(1));
 		let data: ListData = request(&url)?;
 		let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
 		if hide {
@@ -361,7 +372,89 @@ register_source!(NovelBuddy, ListingProvider, DeepLinkHandler);
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use aidoku::{ContentRating, FilterValue};
 	use aidoku_test::aidoku_test;
+
+	#[test]
+	fn rating_matches_safe() {
+		assert!(rating_matches("safe", ContentRating::Safe));
+	}
+
+	#[test]
+	fn rating_matches_suggestive() {
+		assert!(rating_matches("suggestive", ContentRating::Suggestive));
+	}
+
+	#[test]
+	fn rating_matches_nsfw() {
+		assert!(rating_matches("nsfw", ContentRating::NSFW));
+	}
+
+	#[test]
+	fn rating_matches_mismatched() {
+		assert!(!rating_matches("safe", ContentRating::Suggestive));
+		assert!(!rating_matches("nsfw", ContentRating::Safe));
+		assert!(!rating_matches("suggestive", ContentRating::NSFW));
+	}
+
+	#[test]
+	fn filter_by_rating_empty_selection_returns_all() {
+		let entries = vec![
+			Manga {
+				key: "1".into(),
+				content_rating: ContentRating::Safe,
+				..Default::default()
+			},
+			Manga {
+				key: "2".into(),
+				content_rating: ContentRating::NSFW,
+				..Default::default()
+			},
+		];
+		assert_eq!(filter_by_rating(entries, &[]).len(), 2);
+	}
+
+	#[test]
+	fn filter_by_rating_single_selection() {
+		let entries = vec![
+			Manga {
+				key: "1".into(),
+				content_rating: ContentRating::Safe,
+				..Default::default()
+			},
+			Manga {
+				key: "2".into(),
+				content_rating: ContentRating::Suggestive,
+				..Default::default()
+			},
+		];
+		let filtered = filter_by_rating(entries, &["suggestive".into()]);
+		assert_eq!(filtered.len(), 1);
+		assert_eq!(filtered[0].key, "2");
+	}
+
+	#[test]
+	fn filter_by_rating_suggestive_and_nsfw_selection() {
+		let entries = vec![
+			Manga {
+				key: "1".into(),
+				content_rating: ContentRating::Safe,
+				..Default::default()
+			},
+			Manga {
+				key: "2".into(),
+				content_rating: ContentRating::Suggestive,
+				..Default::default()
+			},
+			Manga {
+				key: "3".into(),
+				content_rating: ContentRating::NSFW,
+				..Default::default()
+			},
+		];
+		let filtered = filter_by_rating(entries, &["suggestive".into(), "nsfw".into()]);
+		assert_eq!(filtered.len(), 2);
+	}
 
 	#[aidoku_test]
 	fn search_returns_results() {

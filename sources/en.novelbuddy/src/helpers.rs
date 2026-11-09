@@ -48,11 +48,8 @@ impl From<TitleListItem> for Manga {
 		} else {
 			Some(format!("{BASE_URL}/{slug}"))
 		};
-		let content_rating = if item.is_adult {
-			aidoku::ContentRating::NSFW
-		} else {
-			aidoku::ContentRating::Safe
-		};
+		let genre_names: Vec<String> = item.genres.into_iter().map(|g| g.name).collect();
+		let content_rating = content_rating(item.is_adult, &genre_names);
 		Manga {
 			key: item.id,
 			title: item.name,
