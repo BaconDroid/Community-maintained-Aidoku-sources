@@ -34,6 +34,8 @@ const SORT_IDS: &[&str] = &[
 	"bookmarks",
 ];
 
+const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
+
 struct NovelBuddy;
 
 impl Source for NovelBuddy {
@@ -65,16 +67,16 @@ impl Source for NovelBuddy {
 					included,
 					excluded,
 				} if id == "status" => {
-					if !included.is_empty() {
-						status_filter = included;
-					} else if !excluded.is_empty() {
-						let all: Vec<&str> = ["ongoing", "completed", "hiatus", "cancelled"].to_vec();
-						status_filter = all
+					let mut selected: Vec<String> = included.clone();
+					if !excluded.is_empty() {
+						let all: Vec<&str> = STATUS_IDS.to_vec();
+						selected = all
 							.iter()
 							.filter(|s| !excluded.contains(&(**s).to_lowercase()))
 							.map(|s| (*s).into())
 							.collect();
 					}
+					status_filter = selected;
 				}
 				FilterValue::MultiSelect {
 					id,
@@ -150,6 +152,9 @@ impl Source for NovelBuddy {
 						.collect();
 					all_entries.append(&mut filtered);
 				}
+			}
+			if hide {
+				mtl::retain_manga(&mut all_entries);
 			}
 			all_entries.sort_by_key(|m| m.key.clone());
 			all_entries.dedup_by_key(|m| m.key.clone());
