@@ -15,7 +15,7 @@ mod mtl;
 mod settings;
 mod watermark;
 
-use helpers::{fetch_chapter_list, request, resolve_slug};
+use helpers::{fetch_chapter_list, keep_ratings, request, resolve_slug};
 use markdown::to_markdown;
 use models::{ChapterDetailData, ListData, TitleDetailData, TrendingData};
 
@@ -109,6 +109,7 @@ impl Source for NovelBuddy {
 		if hide {
 			mtl::retain_manga(&mut entries);
 		}
+		keep_ratings(&mut entries, &settings::rating_filters());
 		Ok(MangaPageResult {
 			entries,
 			has_next_page: data.pagination.has_next,
@@ -175,6 +176,7 @@ impl ListingProvider for NovelBuddy {
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
+				keep_ratings(&mut entries, &settings::rating_filters());
 				Ok(MangaPageResult {
 					entries,
 					has_next_page: false,
@@ -187,6 +189,7 @@ impl ListingProvider for NovelBuddy {
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
+				keep_ratings(&mut entries, &settings::rating_filters());
 				Ok(MangaPageResult {
 					entries,
 					has_next_page: data.pagination.has_next,

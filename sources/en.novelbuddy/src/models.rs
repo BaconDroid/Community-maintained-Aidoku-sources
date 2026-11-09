@@ -36,6 +36,10 @@ pub struct TitleListItem {
 	pub cover: Option<String>,
 	#[serde(default)]
 	pub is_mtl: bool,
+	#[serde(default)]
+	pub is_adult: bool,
+	#[serde(default)]
+	pub genres: Vec<NamedSlug>,
 }
 
 #[derive(Deserialize)]

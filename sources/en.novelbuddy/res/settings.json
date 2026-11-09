@@ -5,6 +5,25 @@
 		"items": [
 			{
 				"type": "multi-select",
+				"key": "ratings",
+				"title": "Content Rating",
+				"titles": [
+					"Safe",
+					"Suggestive",
+					"NSFW"
+				],
+				"values": [
+					"safe",
+					"suggestive",
+					"nsfw"
+				],
+				"default": [],
+				"refreshes": [
+					"content"
+				]
+			},
+			{
+				"type": "multi-select",
 				"key": "hiddenGenres",
 				"title": "Hidden Genres",
 				"titles": [
