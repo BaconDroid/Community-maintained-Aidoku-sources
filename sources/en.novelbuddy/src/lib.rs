@@ -29,24 +29,26 @@ struct SearchContext {
 	chosen_sort: Option<&'static str>,
 	excluded_genres: Vec<String>,
 	included_genres: Vec<String>,
-	status_filter: Vec<String>,
-	content_rating_filter: Vec<String>,
+	status_filter: Option<Vec<String>>,
+	content_rating_filter: Option<Vec<String>>,
 }
 
 fn resolve_multi_select(
 	all_options: &[&'static str],
 	included: Vec<String>,
 	excluded: Vec<String>,
-) -> Vec<String> {
-	if excluded.is_empty() {
-		return included;
-	}
+) -> Option<Vec<String>> {
 	let lower_excluded: Vec<String> = excluded.iter().map(|e| e.to_lowercase()).collect();
-	all_options
-		.iter()
-		.filter(|s| !lower_excluded.contains(&(**s).to_lowercase()))
-		.map(|s| (*s).into())
-		.collect()
+	let base: Vec<String> = if included.is_empty() {
+		all_options.iter().map(|s| (*s).into()).collect()
+	} else {
+		included
+	};
+	let filtered: Vec<String> = base
+		.into_iter()
+		.filter(|s| !lower_excluded.contains(&s.to_lowercase()))
+		.collect();
+	Some(filtered)
 }
 
 fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
@@ -55,8 +57,8 @@ fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 	let mut chosen_sort: Option<&'static str> = None;
 	let mut excluded_genres = settings::hidden_genres();
 	let mut included_genres: Vec<String> = Vec::new();
-	let mut status_filter: Vec<String> = Vec::new();
-	let mut content_rating_filter: Vec<String> = Vec::new();
+	let mut status_filter: Option<Vec<String>> = None;
+	let mut content_rating_filter: Option<Vec<String>> = None;
 
 	for filter in filters {
 		match filter {
@@ -167,14 +169,14 @@ fn build_status_search_url(
 	format!("{API_URL}/titles/search?{qs}")
 }
 
-fn merge_with_persistent<T: Eq + Ord + Clone>(runtime: &[T], persistent: Vec<T>) -> Vec<T> {
-	if runtime.is_empty() {
-		persistent
-	} else {
-		let mut merged = runtime.to_vec();
-		merged.sort();
-		merged.dedup();
-		merged
+fn merge_with_persistent(runtime: Option<Vec<String>>, persistent: Vec<String>) -> Vec<String> {
+	match runtime {
+		None => persistent,
+		Some(mut values) => {
+			values.sort();
+			values.dedup();
+			values
+		}
 	}
 }
 
@@ -224,6 +226,7 @@ fn fetch_multi_status(
 	let mut all_entries: Vec<Manga> = Vec::new();
 	let mut any_has_next = false;
 	let mut first_error: Option<AidokuError> = None;
+	let mut success_count = 0usize;
 
 	for status in all_statuses {
 		let url = build_status_search_url(ctx, query, page, status);
@@ -239,6 +242,7 @@ fn fetch_multi_status(
 					any_has_next = true;
 				}
 				all_entries.append(&mut filtered);
+				success_count += 1;
 			}
 			Err(e) => {
 				if first_error.is_none() {
@@ -248,7 +252,7 @@ fn fetch_multi_status(
 		}
 	}
 
-	if all_entries.is_empty() {
+	if success_count == 0 {
 		if let Some(e) = first_error {
 			return Err(e);
 		}
@@ -290,9 +294,11 @@ impl Source for NovelBuddy {
 		let ctx = parse_filters(filters);
 		let hide = settings::hide_mtl() && !query.as_deref().is_some_and(mtl::mentions_mtl);
 
-		let all_ratings =
-			merge_with_persistent(&ctx.content_rating_filter, persistent_content_rating());
-		let all_statuses = merge_with_persistent(&ctx.status_filter, persistent_status());
+		let all_ratings = merge_with_persistent(
+			ctx.content_rating_filter.clone(),
+			persistent_content_rating(),
+		);
+		let all_statuses = merge_with_persistent(ctx.status_filter.clone(), persistent_status());
 
 		if all_statuses.len() > 1 {
 			return fetch_multi_status(
@@ -414,7 +420,8 @@ impl DeepLinkHandler for NovelBuddy {
 			.rsplit("novelbuddy.me")
 			.next()
 			.unwrap_or("")
-			.trim_start_matches('/');
+			.trim_start_matches('/')
+			.trim_end_matches('/');
 		if path.is_empty() {
 			return Ok(None);
 		}
