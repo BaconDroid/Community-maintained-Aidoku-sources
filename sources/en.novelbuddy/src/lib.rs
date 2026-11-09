@@ -15,9 +15,14 @@ mod mtl;
 mod settings;
 mod watermark;
 
-use helpers::{fetch_chapter_list, keep_ratings, request, resolve_slug};
+use helpers::{fetch_chapter_list, request, resolve_slug};
 use markdown::to_markdown;
 use models::{ChapterDetailData, ListData, TitleDetailData, TrendingData};
+use settings::{
+	content_rating_filter as persistent_content_rating, status_filter as persistent_status,
+};
+
+const CONTENT_RATING_IDS: &[&str] = &["safe", "suggestive", "nsfw"];
 
 pub const BASE_URL: &str = "https://novelbuddy.me";
 pub const API_URL: &str = "https://api.novelbuddy.me";
@@ -32,6 +37,27 @@ const SORT_IDS: &[&str] = &[
 	"views",
 	"bookmarks",
 ];
+
+const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
+
+fn rating_matches(rating: &str, content_rating: aidoku::ContentRating) -> bool {
+	matches!(
+		(rating, content_rating),
+		("safe", aidoku::ContentRating::Safe)
+			| ("suggestive", aidoku::ContentRating::Suggestive)
+			| ("nsfw", aidoku::ContentRating::NSFW)
+	)
+}
+
+fn filter_by_rating(entries: Vec<Manga>, ratings: &[String]) -> Vec<Manga> {
+	if ratings.is_empty() {
+		return entries;
+	}
+	entries
+		.into_iter()
+		.filter(|m| ratings.iter().any(|r| rating_matches(r, m.content_rating)))
+		.collect()
+}
 
 struct NovelBuddy;
 
@@ -49,6 +75,8 @@ impl Source for NovelBuddy {
 		let mut qs = QueryParameters::new();
 		let mut has_sort = false;
 		let mut excluded_genres = settings::hidden_genres();
+		let mut status_filter: Vec<String> = Vec::new();
+		let mut content_rating_filter: Vec<String> = Vec::new();
 
 		for filter in filters {
 			match filter {
@@ -58,8 +86,37 @@ impl Source for NovelBuddy {
 						has_sort = true;
 					}
 				}
-				FilterValue::Select { id, value } if id == "status" && value != "all" => {
-					qs.push("status", Some(&value));
+				FilterValue::MultiSelect {
+					id,
+					included,
+					excluded,
+				} if id == "status" => {
+					let mut selected: Vec<String> = included.clone();
+					if !excluded.is_empty() {
+						let all: Vec<&str> = STATUS_IDS.to_vec();
+						selected = all
+							.iter()
+							.filter(|s| !excluded.contains(&(**s).to_lowercase()))
+							.map(|s| (*s).into())
+							.collect();
+					}
+					status_filter = selected;
+				}
+				FilterValue::MultiSelect {
+					id,
+					included,
+					excluded,
+				} if id == "contentRating" => {
+					let mut selected: Vec<String> = included.clone();
+					if !excluded.is_empty() {
+						let all: Vec<&str> = CONTENT_RATING_IDS.to_vec();
+						selected = all
+							.iter()
+							.filter(|s| !excluded.contains(&(**s).to_lowercase()))
+							.map(|s| (*s).into())
+							.collect();
+					}
+					content_rating_filter = selected;
 				}
 				FilterValue::MultiSelect {
 					id,
@@ -102,14 +159,69 @@ impl Source for NovelBuddy {
 		}
 
 		let hide = settings::hide_mtl() && !query.as_deref().is_some_and(mtl::mentions_mtl);
-		qs.set("page", Some(&page.max(1).to_string()));
+
+		let mut all_ratings: Vec<String> = content_rating_filter;
+		for r in persistent_content_rating() {
+			if !all_ratings.contains(&r) {
+				all_ratings.push(r);
+			}
+		}
+		all_ratings.sort();
+		all_ratings.dedup();
+
+		let mut all_statuses: Vec<String> = status_filter;
+		for s in persistent_status() {
+			if !all_statuses.contains(&s) {
+				all_statuses.push(s);
+			}
+		}
+		all_statuses.sort();
+		all_statuses.dedup();
+
+		if all_statuses.len() > 1 {
+			let mut all_entries: Vec<Manga> = Vec::new();
+			for status in &all_statuses {
+				let mut qs_status = QueryParameters::new();
+				qs_status.push("sort", Some("popular"));
+				if !excluded_genres.is_empty() {
+					qs_status.push("exclude", Some(&excluded_genres.join(",")));
+				}
+				if let Some(q) = query.as_deref() {
+					qs_status.push("q", Some(q));
+				}
+				qs_status.push("status", Some(status));
+				qs_status.set("page", Some(&page.max(1).to_string()));
+				let url = format!("{API_URL}/titles/search?{qs_status}");
+				if let Ok(list_data) = request::<ListData>(&url) {
+					let mut filtered: Vec<Manga> = list_data
+						.items
+						.into_iter()
+						.filter(|item| item.status.as_deref() == Some(status))
+						.map(Manga::from)
+						.collect();
+					all_entries.append(&mut filtered);
+				}
+			}
+			if hide {
+				mtl::retain_manga(&mut all_entries);
+			}
+			all_entries = filter_by_rating(all_entries, &all_ratings);
+			all_entries.sort_by_key(|m| m.key.clone());
+			all_entries.dedup_by_key(|m| m.key.clone());
+			return Ok(MangaPageResult {
+				entries: all_entries,
+				has_next_page: false,
+			});
+		} else if let Some(status) = all_statuses.first() {
+			qs.push("status", Some(status));
+		}
 		let url = format!("{API_URL}/titles/search?{qs}");
 		let data: ListData = request(&url)?;
 		let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
 		if hide {
 			mtl::retain_manga(&mut entries);
 		}
-		keep_ratings(&mut entries, &settings::rating_filters());
+		entries = filter_by_rating(entries, &all_ratings);
 		Ok(MangaPageResult {
 			entries,
 			has_next_page: data.pagination.has_next,
@@ -176,7 +288,7 @@ impl ListingProvider for NovelBuddy {
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
-				keep_ratings(&mut entries, &settings::rating_filters());
+				entries = filter_by_rating(entries, &persistent_content_rating());
 				Ok(MangaPageResult {
 					entries,
 					has_next_page: false,
@@ -189,7 +301,7 @@ impl ListingProvider for NovelBuddy {
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
-				keep_ratings(&mut entries, &settings::rating_filters());
+				entries = filter_by_rating(entries, &persistent_content_rating());
 				Ok(MangaPageResult {
 					entries,
 					has_next_page: data.pagination.has_next,
@@ -335,5 +447,23 @@ mod tests {
 			DeepLinkResult::Manga { key } => assert_eq!(key, "VYPGVZ8z"),
 			_ => panic!("expected Manga deep link"),
 		}
+	}
+
+	#[aidoku_test]
+	fn status_multi_select_finds_results() {
+		use aidoku::alloc::vec;
+		let filters = [FilterValue::MultiSelect {
+			id: "status".into(),
+			included: vec!["ongoing".into(), "completed".into()],
+			excluded: Vec::new(),
+		}];
+		let result = NovelBuddy
+			.get_search_manga_list(Some("shadow slave".into()), 1, filters)
+			.expect("search with status filter failed");
+		assert!(
+			!result.entries.is_empty(),
+			"status multi-select should return results, got {}",
+			result.entries.len()
+		);
 	}
 }

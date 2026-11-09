@@ -48,14 +48,16 @@ impl From<TitleListItem> for Manga {
 		} else {
 			Some(format!("{BASE_URL}/{slug}"))
 		};
-		let genres: Vec<String> = item.genres.into_iter().map(|genre| genre.name).collect();
-		let content_rating = content_rating(item.is_adult, &genres);
+		let content_rating = if item.is_adult {
+			aidoku::ContentRating::NSFW
+		} else {
+			aidoku::ContentRating::Safe
+		};
 		Manga {
 			key: item.id,
 			title: item.name,
 			cover: item.cover,
 			url,
-			tags: (!genres.is_empty()).then_some(genres),
 			content_rating,
 			..Default::default()
 		}
@@ -63,7 +65,7 @@ impl From<TitleListItem> for Manga {
 }
 
 fn content_rating(is_adult: bool, tags: &[String]) -> ContentRating {
-	if is_adult || tags.iter().any(|tag| is_nsfw_signal(tag)) {
+	if is_adult {
 		return ContentRating::NSFW;
 	}
 	if tags.iter().any(|tag| is_suggestive_signal(tag)) {
@@ -73,38 +75,11 @@ fn content_rating(is_adult: bool, tags: &[String]) -> ContentRating {
 	}
 }
 
-fn is_nsfw_signal(value: &str) -> bool {
-	const NSFW_TAGS: &[&str] = &["adult", "erotica", "pornographic", "smut"];
-	NSFW_TAGS
-		.iter()
-		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
-}
-
 fn is_suggestive_signal(value: &str) -> bool {
 	const SUGGESTIVE_TAGS: &[&str] = &["adult", "bl", "ecchi", "smut"];
 	SUGGESTIVE_TAGS
 		.iter()
 		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
-}
-
-pub fn rating_id(rating: ContentRating) -> &'static str {
-	match rating {
-		ContentRating::NSFW => "nsfw",
-		ContentRating::Suggestive => "suggestive",
-		ContentRating::Safe => "safe",
-		ContentRating::Unknown => "unknown",
-	}
-}
-
-pub fn keep_ratings(entries: &mut Vec<Manga>, ratings: &[String]) {
-	if ratings.is_empty() {
-		return;
-	}
-	entries.retain(|manga| {
-		ratings
-			.iter()
-			.any(|id| id == rating_id(manga.content_rating))
-	});
 }
 
 impl From<TitleDetail> for Manga {
