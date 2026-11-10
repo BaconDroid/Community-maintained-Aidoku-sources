@@ -300,6 +300,21 @@ impl Source for NovelBuddy {
 		);
 		let all_statuses = merge_with_persistent(ctx.status_filter.clone(), persistent_status());
 
+		let match_nothing = ctx
+			.content_rating_filter
+			.as_ref()
+			.is_some_and(|ratings| ratings.is_empty())
+			|| ctx
+				.status_filter
+				.as_ref()
+				.is_some_and(|statuses| statuses.is_empty());
+		if match_nothing {
+			return Ok(MangaPageResult {
+				entries: Vec::new(),
+				has_next_page: false,
+			});
+		}
+
 		if all_statuses.len() > 1 {
 			return fetch_multi_status(
 				&ctx,
@@ -425,7 +440,9 @@ impl DeepLinkHandler for NovelBuddy {
 		if path.is_empty() {
 			return Ok(None);
 		}
-		let (series_slug, chapter_slug) = path.split_once('/').unwrap_or((path, ""));
+		let mut segments = path.split('/').filter(|s| !s.is_empty());
+		let series_slug = segments.next().unwrap_or("");
+		let chapter_slug = segments.next().unwrap_or("");
 		if series_slug.is_empty() {
 			return Ok(None);
 		}
@@ -436,7 +453,7 @@ impl DeepLinkHandler for NovelBuddy {
 			let chapters = fetch_chapter_list(&manga_key)?;
 			let chapter_key = chapters.into_iter().find_map(|c| {
 				let url = c.url.as_deref().unwrap_or("");
-				if url.rsplit('/').next() == Some(chapter_slug) {
+				if url.trim_end_matches('/').rsplit('/').next() == Some(chapter_slug) {
 					Some(c.key)
 				} else {
 					None
@@ -539,6 +556,86 @@ mod tests {
 		assert_eq!(filtered.len(), 2);
 	}
 
+	#[test]
+	fn resolve_multi_select_empty_included_takes_all_options() {
+		let selected =
+			resolve_multi_select(&["safe", "suggestive", "nsfw"], Vec::new(), Vec::new()).unwrap();
+		assert_eq!(selected, vec!["safe", "suggestive", "nsfw"]);
+	}
+
+	#[test]
+	fn resolve_multi_select_keeps_included_without_exclusions() {
+		let selected = resolve_multi_select(
+			&["safe", "suggestive", "nsfw"],
+			vec!["nsfw".into()],
+			Vec::new(),
+		)
+		.unwrap();
+		assert_eq!(selected, vec!["nsfw"]);
+	}
+
+	#[test]
+	fn resolve_multi_select_applies_exclusions_to_included() {
+		let selected = resolve_multi_select(
+			&["safe", "suggestive", "nsfw"],
+			vec!["safe".into(), "nsfw".into()],
+			vec!["NSFW".into()],
+		)
+		.unwrap();
+		assert_eq!(selected, vec!["safe"]);
+	}
+
+	#[test]
+	fn resolve_multi_select_excluding_every_option_yields_empty_selection() {
+		let excluded: Vec<String> = ["safe", "suggestive", "nsfw"]
+			.iter()
+			.map(|s| (*s).into())
+			.collect();
+		let selected = resolve_multi_select(&["safe", "suggestive", "nsfw"], Vec::new(), excluded);
+		assert_eq!(selected, Some(Vec::new()));
+	}
+
+	#[test]
+	fn merge_with_persistent_falls_back_when_no_runtime_selection() {
+		assert_eq!(
+			merge_with_persistent(None, vec!["safe".into()]),
+			vec!["safe"]
+		);
+	}
+
+	#[test]
+	fn merge_with_persistent_runtime_overrides_persistent() {
+		assert_eq!(
+			merge_with_persistent(Some(vec!["nsfw".into()]), vec!["safe".into()]),
+			vec!["nsfw"]
+		);
+	}
+
+	#[test]
+	fn merge_with_persistent_keeps_explicit_empty_selection() {
+		assert_eq!(
+			merge_with_persistent(Some(Vec::new()), vec!["safe".into()]),
+			Vec::<String>::new()
+		);
+	}
+
+	#[test]
+	fn deep_link_segments_ignore_trailing_slash_and_extra_segments() {
+		let path = "shadow-slave/chapter-1/extra/".trim_end_matches('/');
+		let mut segments = path.split('/').filter(|s| !s.is_empty());
+		assert_eq!(segments.next(), Some("shadow-slave"));
+		assert_eq!(segments.next(), Some("chapter-1"));
+	}
+
+	#[test]
+	fn chapter_url_match_ignores_trailing_slash() {
+		let url = "https://novelbuddy.me/shadow-slave/chapter-1/";
+		assert_eq!(
+			url.trim_end_matches('/').rsplit('/').next(),
+			Some("chapter-1")
+		);
+	}
+
 	#[aidoku_test]
 	fn search_returns_results() {
 		let source = NovelBuddy;
@@ -628,7 +725,7 @@ mod tests {
 	#[aidoku_test]
 	fn status_multi_select_finds_results() {
 		use aidoku::alloc::vec;
-		let filters = [FilterValue::MultiSelect {
+		let filters = vec![FilterValue::MultiSelect {
 			id: "status".into(),
 			included: vec!["ongoing".into(), "completed".into()],
 			excluded: Vec::new(),
