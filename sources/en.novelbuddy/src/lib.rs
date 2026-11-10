@@ -123,18 +123,11 @@ impl Source for NovelBuddy {
 					included,
 					excluded,
 				} if id == "genres" => {
-					let included: Vec<String> = included
-						.into_iter()
-						.filter(|genre| {
-							// if a hidden genre is manually included in filters, skip hiding it
-							if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
-								excluded_genres.swap_remove(pos);
-								false
-							} else {
-								true
-							}
-						})
-						.collect();
+					for genre in &included {
+						if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
+							excluded_genres.swap_remove(pos);
+						}
+					}
 					if !included.is_empty() {
 						qs.push("genres", Some(&included.join(",")));
 					}
@@ -452,7 +445,7 @@ mod tests {
 	#[aidoku_test]
 	fn status_multi_select_finds_results() {
 		use aidoku::alloc::vec;
-		let filters = [FilterValue::MultiSelect {
+		let filters: Vec<FilterValue> = vec![FilterValue::MultiSelect {
 			id: "status".into(),
 			included: vec!["ongoing".into(), "completed".into()],
 			excluded: Vec::new(),
