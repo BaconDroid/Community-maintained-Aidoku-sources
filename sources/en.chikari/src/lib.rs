@@ -223,6 +223,14 @@ impl ListingProvider for Chikari {
 	}
 }
 
+fn chapter_deep_link(manga_key: String, number: &str) -> Option<DeepLinkResult> {
+	let number: f32 = number.parse().ok()?;
+	Some(DeepLinkResult::Chapter {
+		manga_key,
+		key: helpers::chapter_key(number),
+	})
+}
+
 impl DeepLinkHandler for Chikari {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
 		let Some(path) = helpers::chikari_path(&url) else {
@@ -236,18 +244,12 @@ impl DeepLinkHandler for Chikari {
 			_ => return Ok(None),
 		};
 		let manga_key = deep_link_manga_key(ContentType::from_segment(kind), slug);
-		match rest {
-			[] => Ok(Some(DeepLinkResult::Manga { key: manga_key })),
-			[number] if valid_number(number) => Ok(Some(DeepLinkResult::Chapter {
-				manga_key,
-				key: (*number).into(),
-			})),
-			["chapters", number] if valid_number(number) => Ok(Some(DeepLinkResult::Chapter {
-				manga_key,
-				key: (*number).into(),
-			})),
-			_ => Ok(None),
-		}
+		Ok(match rest {
+			[] => Some(DeepLinkResult::Manga { key: manga_key }),
+			[number] if valid_number(number) => chapter_deep_link(manga_key, number),
+			["chapters", number] if valid_number(number) => chapter_deep_link(manga_key, number),
+			_ => None,
+		})
 	}
 }
 
@@ -386,6 +388,16 @@ mod tests {
 				.handle_deep_link("https://chikari.moe/series/shadow-slave/0".into())
 				.unwrap()
 				.is_none()
+		);
+	}
+
+	#[aidoku_test]
+	fn deep_links_normalize_chapter_numbers() {
+		assert!(
+			matches!(Chikari.handle_deep_link("https://chikari.moe/novels/shadow-slave/1.50".into()).unwrap(), Some(DeepLinkResult::Chapter { manga_key, key }) if manga_key == "shadow-slave" && key == "1.5")
+		);
+		assert!(
+			matches!(Chikari.handle_deep_link("https://chikari.moe/series/shadow-slave/chapters/02".into()).unwrap(), Some(DeepLinkResult::Chapter { manga_key, key }) if manga_key == "series:shadow-slave" && key == "2")
 		);
 	}
 
