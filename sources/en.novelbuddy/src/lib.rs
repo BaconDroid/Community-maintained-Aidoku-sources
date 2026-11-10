@@ -26,9 +26,6 @@ const CONTENT_RATING_IDS: &[&str] = &["safe", "suggestive", "nsfw"];
 
 struct SearchContext {
 	qs: QueryParameters,
-	chosen_sort: Option<&'static str>,
-	excluded_genres: Vec<String>,
-	included_genres: Vec<String>,
 	status_filter: Option<Vec<String>>,
 	content_rating_filter: Option<Vec<String>>,
 }
@@ -54,9 +51,7 @@ fn resolve_multi_select(
 fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 	let mut qs = QueryParameters::new();
 	let mut has_sort = false;
-	let mut chosen_sort: Option<&'static str> = None;
 	let mut excluded_genres = settings::hidden_genres();
-	let mut included_genres: Vec<String> = Vec::new();
 	let mut status_filter: Option<Vec<String>> = None;
 	let mut content_rating_filter: Option<Vec<String>> = None;
 
@@ -66,7 +61,6 @@ fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 				if let Some(s) = SORT_IDS.get(index as usize) {
 					qs.push("sort", Some(*s));
 					has_sort = true;
-					chosen_sort = Some(*s);
 				}
 			}
 			FilterValue::MultiSelect {
@@ -96,7 +90,6 @@ fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 				}
 				if !included.is_empty() {
 					qs.push("genres", Some(&included.join(",")));
-					included_genres = included;
 				}
 				for genre in excluded {
 					if !excluded_genres.contains(&genre) {
@@ -117,9 +110,6 @@ fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 
 	SearchContext {
 		qs,
-		chosen_sort,
-		excluded_genres,
-		included_genres,
 		status_filter,
 		content_rating_filter,
 	}
@@ -139,28 +129,6 @@ fn build_search_url(
 		qs.push("status", Some(s));
 	}
 	format!("{API_URL}/titles/search?{qs}&page={}", page.max(1))
-}
-
-fn build_status_search_url(
-	ctx: &SearchContext,
-	query: Option<&str>,
-	page: i32,
-	status: &str,
-) -> String {
-	let mut qs = QueryParameters::new();
-	qs.push("sort", ctx.chosen_sort.or(Some("popular")));
-	if !ctx.excluded_genres.is_empty() {
-		qs.push("exclude", Some(&ctx.excluded_genres.join(",")));
-	}
-	if !ctx.included_genres.is_empty() {
-		qs.push("genres", Some(&ctx.included_genres.join(",")));
-	}
-	if let Some(q) = query {
-		qs.push("q", Some(q));
-	}
-	qs.push("status", Some(status));
-	qs.set("page", Some(&page.max(1).to_string()));
-	format!("{API_URL}/titles/search?{qs}")
 }
 
 fn merge_with_persistent(runtime: Option<Vec<String>>, persistent: Vec<String>) -> Vec<String> {
@@ -231,7 +199,7 @@ fn fetch_multi_status(
 	let mut success_count = 0usize;
 
 	for status in all_statuses {
-		let url = build_status_search_url(ctx, query, page, status);
+		let url = build_search_url(ctx, query, page, Some(status));
 		match request::<ListData>(&url) {
 			Ok(list_data) => {
 				let mut filtered: Vec<Manga> = list_data
