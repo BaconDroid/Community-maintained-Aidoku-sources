@@ -225,13 +225,9 @@ impl ListingProvider for Chikari {
 
 impl DeepLinkHandler for Chikari {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
-		let path = url
-			.split(['?', '#'])
-			.next()
-			.unwrap_or(&url)
-			.rsplit("chikari.moe")
-			.next()
-			.unwrap_or("");
+		let Some(path) = helpers::chikari_path(&url) else {
+			return Ok(None);
+		};
 		let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
 		let (kind, slug, rest) = match parts.as_slice() {
 			[kind @ ("novels" | "series"), slug, rest @ ..] if valid_slug(slug) => {
@@ -404,6 +400,18 @@ mod tests {
 		assert!(
 			Chikari
 				.handle_deep_link("https://example.com/novels/shadow-slave".into())
+				.unwrap()
+				.is_none()
+		);
+		assert!(
+			Chikari
+				.handle_deep_link("https://evil.com/chikari.moe/novels/shadow-slave".into())
+				.unwrap()
+				.is_none()
+		);
+		assert!(
+			Chikari
+				.handle_deep_link("https://chikari.moe.evil.com/novels/shadow-slave".into())
 				.unwrap()
 				.is_none()
 		);

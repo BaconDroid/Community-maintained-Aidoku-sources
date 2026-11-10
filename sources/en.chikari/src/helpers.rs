@@ -429,6 +429,25 @@ pub fn parse_iso_date(value: &str) -> Option<i64> {
 	})
 }
 
+const ALLOWED_HOSTS: &[&str] = &["chikari.moe", "www.chikari.moe"];
+
+pub fn chikari_path(url: &str) -> Option<&str> {
+	let without_fragment = url.split(['?', '#']).next()?;
+	let (_, authority_and_path) = without_fragment.split_once("://")?;
+	let (authority, path) = authority_and_path
+		.split_once('/')
+		.unwrap_or((authority_and_path, ""));
+	let host = authority
+		.rsplit('@')
+		.next()
+		.unwrap_or(authority)
+		.split(':')
+		.next()
+		.unwrap_or(authority);
+	let host = host.to_ascii_lowercase();
+	ALLOWED_HOSTS.contains(&host.as_str()).then_some(path)
+}
+
 pub fn valid_slug(value: &str) -> bool {
 	!value.is_empty()
 		&& value
@@ -474,6 +493,26 @@ mod tests {
 	use super::*;
 	use aidoku::alloc::vec;
 	use aidoku_test::aidoku_test;
+
+	#[aidoku_test]
+	fn chikari_path_accepts_only_catalog_hosts() {
+		assert_eq!(
+			chikari_path("https://chikari.moe/novels/a?x=1"),
+			Some("novels/a")
+		);
+		assert_eq!(
+			chikari_path("http://www.chikari.moe/series/b/#frag"),
+			Some("series/b/")
+		);
+		assert_eq!(
+			chikari_path("https://CHIKARI.MOE:443/novels/c"),
+			Some("novels/c")
+		);
+		assert_eq!(chikari_path("https://evil.com/chikari.moe/novels/a"), None);
+		assert_eq!(chikari_path("https://chikari.moe.evil.com/novels/a"), None);
+		assert_eq!(chikari_path("chikari.moe/novels/a"), None);
+	}
+
 	#[aidoku_test]
 	fn list_url_sends_types_and_repeated_genres() {
 		let filters = [
