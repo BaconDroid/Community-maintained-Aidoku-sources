@@ -136,11 +136,13 @@ fn apply_settings(filters: Vec<FilterValue>) -> Vec<FilterValue> {
 	}
 	let mut filters = filters;
 	if !hidden.is_empty() {
-		if let Some(FilterValue::MultiSelect { excluded, .. }) = filters
+		if let Some(FilterValue::MultiSelect {
+			included, excluded, ..
+		}) = filters
 			.iter_mut()
 			.find(|filter| matches!(filter, FilterValue::MultiSelect { id, .. } if id == "genres"))
 		{
-			excluded.extend(hidden);
+			excluded.extend(helpers::hidden_genres_to_exclude(hidden, included));
 		} else {
 			filters.push(FilterValue::MultiSelect {
 				id: "genres".into(),
@@ -232,10 +234,13 @@ impl ListingProvider for Chikari {
 
 impl DeepLinkHandler for Chikari {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
-		let path = url.split(['?', '#']).next().unwrap_or("");
-		let Some(path) = path.strip_prefix(BASE_URL) else {
-			return Ok(None);
-		};
+		let path = url
+			.split(['?', '#'])
+			.next()
+			.unwrap_or(&url)
+			.rsplit("chikari.moe")
+			.next()
+			.unwrap_or("");
 		let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
 		if parts.len() == 2
 			&& (parts[0] == "novels" || parts[0] == "series")
@@ -404,6 +409,22 @@ mod tests {
 		assert!(
 			Chikari
 				.handle_deep_link("https://chikari.moe/series/shadow-slave/0".into())
+				.unwrap()
+				.is_none()
+		);
+	}
+
+	#[aidoku_test]
+	fn deep_links_accept_host_and_trailing_slash_variants() {
+		assert!(
+			matches!(Chikari.handle_deep_link("https://www.chikari.moe/novels/shadow-slave/".into()).unwrap(), Some(DeepLinkResult::Manga { key }) if key == "shadow-slave")
+		);
+		assert!(
+			matches!(Chikari.handle_deep_link("http://chikari.moe/series/shadow-slave/1/".into()).unwrap(), Some(DeepLinkResult::Chapter { manga_key, key }) if manga_key == "series:shadow-slave" && key == "1")
+		);
+		assert!(
+			Chikari
+				.handle_deep_link("https://example.com/novels/shadow-slave".into())
 				.unwrap()
 				.is_none()
 		);

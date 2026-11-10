@@ -147,6 +147,17 @@ pub fn list_url(
 	Some(format!("{BASE_URL}/api/series?{qs}"))
 }
 
+pub fn hidden_genres_to_exclude(hidden: Vec<String>, included: &[String]) -> Vec<String> {
+	hidden
+		.into_iter()
+		.filter(|hidden_genre| {
+			!included
+				.iter()
+				.any(|kept| kept.eq_ignore_ascii_case(hidden_genre))
+		})
+		.collect()
+}
+
 fn multi_select<'a>(filters: &'a [FilterValue], id: &str) -> (&'a [String], &'a [String]) {
 	filters
 		.iter()
@@ -486,6 +497,18 @@ mod tests {
 		assert!(url.contains("genre=action"));
 		assert!(url.contains("genre_exclude=mature"));
 		assert!(url.contains("q=shadow"));
+	}
+
+	#[aidoku_test]
+	fn hidden_genres_skip_ones_the_user_included() {
+		assert_eq!(
+			hidden_genres_to_exclude(vec!["mature".into(), "smut".into()], &["Mature".into()]),
+			vec!["smut"]
+		);
+		assert_eq!(
+			hidden_genres_to_exclude(Vec::new(), &["action".into()]),
+			Vec::<String>::new()
+		);
 	}
 
 	#[aidoku_test]
