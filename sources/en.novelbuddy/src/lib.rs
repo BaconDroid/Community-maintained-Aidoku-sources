@@ -459,6 +459,17 @@ impl ListingProvider for NovelBuddy {
 	}
 }
 
+fn deep_link_slugs(path: &str) -> (&str, &str) {
+	let mut segments = path.split('/').filter(|s| !s.is_empty());
+	let series = segments.next().unwrap_or("");
+	let chapter = segments.next().unwrap_or("");
+	(series, chapter)
+}
+
+fn chapter_url_matches(url: &str, chapter_slug: &str) -> bool {
+	!chapter_slug.is_empty() && url.trim_end_matches('/').rsplit('/').next() == Some(chapter_slug)
+}
+
 impl DeepLinkHandler for NovelBuddy {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
 		let path = url
@@ -473,9 +484,7 @@ impl DeepLinkHandler for NovelBuddy {
 		if path.is_empty() {
 			return Ok(None);
 		}
-		let mut segments = path.split('/').filter(|s| !s.is_empty());
-		let series_slug = segments.next().unwrap_or("");
-		let chapter_slug = segments.next().unwrap_or("");
+		let (series_slug, chapter_slug) = deep_link_slugs(path);
 		if series_slug.is_empty() {
 			return Ok(None);
 		}
@@ -486,7 +495,7 @@ impl DeepLinkHandler for NovelBuddy {
 			let chapters = fetch_chapter_list(&manga_key)?;
 			let chapter_key = chapters.into_iter().find_map(|c| {
 				let url = c.url.as_deref().unwrap_or("");
-				if url.trim_end_matches('/').rsplit('/').next() == Some(chapter_slug) {
+				if chapter_url_matches(url, chapter_slug) {
 					Some(c.key)
 				} else {
 					None
@@ -508,29 +517,29 @@ mod tests {
 	use aidoku::{ContentRating, FilterValue};
 	use aidoku_test::aidoku_test;
 
-	#[test]
+	#[aidoku_test]
 	fn rating_matches_safe() {
 		assert!(rating_matches("safe", ContentRating::Safe));
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn rating_matches_suggestive() {
 		assert!(rating_matches("suggestive", ContentRating::Suggestive));
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn rating_matches_nsfw() {
 		assert!(rating_matches("nsfw", ContentRating::NSFW));
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn rating_matches_mismatched() {
 		assert!(!rating_matches("safe", ContentRating::Suggestive));
 		assert!(!rating_matches("nsfw", ContentRating::Safe));
 		assert!(!rating_matches("suggestive", ContentRating::NSFW));
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn filter_by_rating_empty_selection_returns_all() {
 		let entries = vec![
 			Manga {
@@ -547,7 +556,7 @@ mod tests {
 		assert_eq!(filter_by_rating(entries, &[]).len(), 2);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn filter_by_rating_single_selection() {
 		let entries = vec![
 			Manga {
@@ -566,7 +575,7 @@ mod tests {
 		assert_eq!(filtered[0].key, "2");
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn filter_by_rating_suggestive_and_nsfw_selection() {
 		let entries = vec![
 			Manga {
@@ -589,14 +598,14 @@ mod tests {
 		assert_eq!(filtered.len(), 2);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn resolve_multi_select_empty_included_takes_all_options() {
 		let selected =
 			resolve_multi_select(&["safe", "suggestive", "nsfw"], Vec::new(), Vec::new()).unwrap();
 		assert_eq!(selected, vec!["safe", "suggestive", "nsfw"]);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn resolve_multi_select_keeps_included_without_exclusions() {
 		let selected = resolve_multi_select(
 			&["safe", "suggestive", "nsfw"],
@@ -607,7 +616,7 @@ mod tests {
 		assert_eq!(selected, vec!["nsfw"]);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn resolve_multi_select_applies_exclusions_to_included() {
 		let selected = resolve_multi_select(
 			&["safe", "suggestive", "nsfw"],
@@ -618,7 +627,7 @@ mod tests {
 		assert_eq!(selected, vec!["safe"]);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn resolve_multi_select_excluding_every_option_yields_empty_selection() {
 		let excluded: Vec<String> = ["safe", "suggestive", "nsfw"]
 			.iter()
@@ -628,7 +637,7 @@ mod tests {
 		assert_eq!(selected, Some(Vec::new()));
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn merge_with_persistent_falls_back_when_no_runtime_selection() {
 		assert_eq!(
 			merge_with_persistent(None, vec!["safe".into()]),
@@ -636,7 +645,7 @@ mod tests {
 		);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn merge_with_persistent_runtime_overrides_persistent() {
 		assert_eq!(
 			merge_with_persistent(Some(vec!["nsfw".into()]), vec!["safe".into()]),
@@ -644,7 +653,7 @@ mod tests {
 		);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn merge_with_persistent_keeps_explicit_empty_selection() {
 		assert_eq!(
 			merge_with_persistent(Some(Vec::new()), vec!["safe".into()]),
@@ -652,7 +661,7 @@ mod tests {
 		);
 	}
 
-	#[test]
+	#[aidoku_test]
 	fn server_status_rejects_unsupported_values() {
 		assert!(is_server_status("ongoing"));
 		assert!(is_server_status("Completed"));
@@ -660,21 +669,34 @@ mod tests {
 		assert!(!is_server_status("cancelled"));
 	}
 
-	#[test]
-	fn deep_link_segments_ignore_trailing_slash_and_extra_segments() {
-		let path = "shadow-slave/chapter-1/extra/".trim_end_matches('/');
-		let mut segments = path.split('/').filter(|s| !s.is_empty());
-		assert_eq!(segments.next(), Some("shadow-slave"));
-		assert_eq!(segments.next(), Some("chapter-1"));
+	#[aidoku_test]
+	fn deep_link_slugs_take_first_two_segments() {
+		assert_eq!(
+			deep_link_slugs("shadow-slave/chapter-1/extra"),
+			("shadow-slave", "chapter-1")
+		);
+		assert_eq!(deep_link_slugs("shadow-slave"), ("shadow-slave", ""));
+		assert_eq!(deep_link_slugs(""), ("", ""));
 	}
 
-	#[test]
-	fn chapter_url_match_ignores_trailing_slash() {
-		let url = "https://novelbuddy.me/shadow-slave/chapter-1/";
-		assert_eq!(
-			url.trim_end_matches('/').rsplit('/').next(),
-			Some("chapter-1")
-		);
+	#[aidoku_test]
+	fn chapter_url_matches_final_segment_only() {
+		assert!(chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave/chapter-1",
+			"chapter-1"
+		));
+		assert!(chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave/chapter-1/",
+			"chapter-1"
+		));
+		assert!(!chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave/chapter-10",
+			"chapter-1"
+		));
+		assert!(!chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave",
+			""
+		));
 	}
 
 	#[aidoku_test]
