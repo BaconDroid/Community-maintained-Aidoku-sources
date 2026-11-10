@@ -89,17 +89,11 @@ fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 				included,
 				excluded,
 			} if id == "genres" => {
-				let included: Vec<String> = included
-					.into_iter()
-					.filter(|genre| {
-						if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
-							excluded_genres.swap_remove(pos);
-							false
-						} else {
-							true
-						}
-					})
-					.collect();
+				for genre in &included {
+					if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
+						excluded_genres.swap_remove(pos);
+					}
+				}
 				if !included.is_empty() {
 					qs.push("genres", Some(&included.join(",")));
 					included_genres = included;
