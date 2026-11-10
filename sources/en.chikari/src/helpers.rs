@@ -474,7 +474,6 @@ mod tests {
 	use super::*;
 	use aidoku::alloc::vec;
 	use aidoku_test::aidoku_test;
-
 	#[aidoku_test]
 	fn list_url_sends_types_and_repeated_genres() {
 		let filters = [
@@ -500,18 +499,6 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn hidden_genres_skip_ones_the_user_included() {
-		assert_eq!(
-			hidden_genres_to_exclude(vec!["mature".into(), "smut".into()], &["Mature".into()]),
-			vec!["smut"]
-		);
-		assert_eq!(
-			hidden_genres_to_exclude(Vec::new(), &["action".into()]),
-			Vec::<String>::new()
-		);
-	}
-
-	#[aidoku_test]
 	fn list_url_defaults_to_every_type_and_rejects_empty_selection() {
 		let url = list_url("popular", 36, 0, None, &[]).unwrap();
 		assert_eq!(url.matches("type=").count(), TYPES.len());
@@ -529,6 +516,18 @@ mod tests {
 			excluded: TYPES.iter().map(|kind| (*kind).into()).collect(),
 		}];
 		assert!(list_url("popular", 36, 0, None, &filters).is_none());
+	}
+
+	#[aidoku_test]
+	fn hidden_genres_skip_ones_the_user_included() {
+		assert_eq!(
+			hidden_genres_to_exclude(vec!["mature".into(), "smut".into()], &["Mature".into()]),
+			vec!["smut"]
+		);
+		assert_eq!(
+			hidden_genres_to_exclude(Vec::new(), &["action".into()]),
+			Vec::<String>::new()
+		);
 	}
 
 	#[aidoku_test]

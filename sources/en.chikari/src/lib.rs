@@ -151,34 +151,25 @@ fn apply_settings(filters: Vec<FilterValue>) -> Vec<FilterValue> {
 			});
 		}
 	}
-	if !selected_types.is_empty() && !has_filter(&filters, "types") {
-		filters.push(FilterValue::MultiSelect {
-			id: "types".into(),
-			included: selected_types.iter().map(|kind| (*kind).into()).collect(),
-			excluded: Vec::new(),
-		});
-	}
-	if !selected_ratings.is_empty() && !has_filter(&filters, "ratings") {
-		filters.push(FilterValue::MultiSelect {
-			id: "ratings".into(),
-			included: selected_ratings
-				.iter()
-				.map(|rating| (*rating).into())
-				.collect(),
-			excluded: Vec::new(),
-		});
-	}
-	if !selected_status.is_empty() && !has_filter(&filters, "status") {
-		filters.push(FilterValue::MultiSelect {
-			id: "status".into(),
-			included: selected_status
-				.iter()
-				.map(|status| (*status).into())
-				.collect(),
-			excluded: Vec::new(),
-		});
-	}
+	push_persistent_selection(&mut filters, "types", selected_types);
+	push_persistent_selection(&mut filters, "ratings", selected_ratings);
+	push_persistent_selection(&mut filters, "status", selected_status);
 	filters
+}
+
+fn push_persistent_selection(
+	filters: &mut Vec<FilterValue>,
+	id: &str,
+	selected: Vec<&'static str>,
+) {
+	if selected.is_empty() || has_filter(filters, id) {
+		return;
+	}
+	filters.push(FilterValue::MultiSelect {
+		id: id.into(),
+		included: selected.into_iter().map(Into::into).collect(),
+		excluded: Vec::new(),
+	});
 }
 
 fn has_filter(filters: &[FilterValue], id: &str) -> bool {
@@ -242,36 +233,25 @@ impl DeepLinkHandler for Chikari {
 			.next()
 			.unwrap_or("");
 		let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
-		if parts.len() == 2
-			&& (parts[0] == "novels" || parts[0] == "series")
-			&& valid_slug(parts[1])
-		{
-			return Ok(Some(DeepLinkResult::Manga {
-				key: deep_link_manga_key(ContentType::from_segment(parts[0]), parts[1]),
-			}));
+		let (kind, slug, rest) = match parts.as_slice() {
+			[kind @ ("novels" | "series"), slug, rest @ ..] if valid_slug(slug) => {
+				(*kind, *slug, rest)
+			}
+			_ => return Ok(None),
+		};
+		let manga_key = deep_link_manga_key(ContentType::from_segment(kind), slug);
+		match rest {
+			[] => Ok(Some(DeepLinkResult::Manga { key: manga_key })),
+			[number] if valid_number(number) => Ok(Some(DeepLinkResult::Chapter {
+				manga_key,
+				key: (*number).into(),
+			})),
+			["chapters", number] if valid_number(number) => Ok(Some(DeepLinkResult::Chapter {
+				manga_key,
+				key: (*number).into(),
+			})),
+			_ => Ok(None),
 		}
-		if parts.len() == 3
-			&& (parts[0] == "novels" || parts[0] == "series")
-			&& valid_slug(parts[1])
-			&& valid_number(parts[2])
-		{
-			return Ok(Some(DeepLinkResult::Chapter {
-				manga_key: deep_link_manga_key(ContentType::from_segment(parts[0]), parts[1]),
-				key: parts[2].into(),
-			}));
-		}
-		if parts.len() == 4
-			&& (parts[0] == "novels" || parts[0] == "series")
-			&& parts[2] == "chapters"
-			&& valid_slug(parts[1])
-			&& valid_number(parts[3])
-		{
-			return Ok(Some(DeepLinkResult::Chapter {
-				manga_key: deep_link_manga_key(ContentType::from_segment(parts[0]), parts[1]),
-				key: parts[3].into(),
-			}));
-		}
-		Ok(None)
 	}
 }
 
@@ -282,7 +262,6 @@ mod tests {
 	use super::*;
 	use crate::helpers::chapter_key;
 	use aidoku_test::aidoku_test;
-
 	#[aidoku_test]
 	fn search_finds_shadow_slave() {
 		let result = Chikari
@@ -293,6 +272,17 @@ mod tests {
 				.entries
 				.iter()
 				.any(|m| m.title.to_ascii_lowercase().contains("shadow slave"))
+		);
+	}
+
+	#[aidoku_test]
+	fn search_sees_every_content_rating() {
+		let result = Chikari
+			.get_search_manga_list(Some("city of witches".into()), 1, Vec::new())
+			.expect("search failed");
+		assert!(
+			result.entries.iter().any(|m| m.key == "city-of-witches"),
+			"expected the erotica-tier title in default results (update the slug if the catalog dropped it)"
 		);
 	}
 
@@ -362,17 +352,6 @@ mod tests {
 			pages
 				.iter()
 				.all(|page| matches!(&page.content, PageContent::Url(_, _)))
-		);
-	}
-
-	#[aidoku_test]
-	fn search_sees_every_content_rating() {
-		let result = Chikari
-			.get_search_manga_list(Some("city of witches".into()), 1, Vec::new())
-			.expect("search failed");
-		assert!(
-			result.entries.iter().any(|m| m.key == "city-of-witches"),
-			"expected the erotica-tier title in default results (update the slug if the catalog dropped it)"
 		);
 	}
 
