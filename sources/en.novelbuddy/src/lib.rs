@@ -196,6 +196,14 @@ const SORT_IDS: &[&str] = &[
 
 const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
 
+const SERVER_STATUS_IDS: &[&str] = &["ongoing", "completed"];
+
+fn is_server_status(value: &str) -> bool {
+	SERVER_STATUS_IDS
+		.iter()
+		.any(|supported| value.eq_ignore_ascii_case(supported))
+}
+
 fn rating_matches(rating: &str, content_rating: aidoku::ContentRating) -> bool {
 	matches!(
 		(rating, content_rating),
@@ -312,6 +320,31 @@ impl Source for NovelBuddy {
 			return Ok(MangaPageResult {
 				entries: Vec::new(),
 				has_next_page: false,
+			});
+		}
+
+		if all_statuses.iter().any(|s| !is_server_status(s)) {
+			let url = build_search_url(&ctx, query.as_deref(), page, None);
+			let data: ListData = request(&url)?;
+			let mut entries: Vec<Manga> = data
+				.items
+				.into_iter()
+				.filter(|item| {
+					item.status.as_deref().is_some_and(|status| {
+						all_statuses
+							.iter()
+							.any(|selected| selected.eq_ignore_ascii_case(status))
+					})
+				})
+				.map(Manga::from)
+				.collect();
+			if hide {
+				mtl::retain_manga(&mut entries);
+			}
+			entries = filter_by_rating(entries, &all_ratings);
+			return Ok(MangaPageResult {
+				entries,
+				has_next_page: data.pagination.has_next,
 			});
 		}
 
@@ -617,6 +650,14 @@ mod tests {
 			merge_with_persistent(Some(Vec::new()), vec!["safe".into()]),
 			Vec::<String>::new()
 		);
+	}
+
+	#[test]
+	fn server_status_rejects_unsupported_values() {
+		assert!(is_server_status("ongoing"));
+		assert!(is_server_status("Completed"));
+		assert!(!is_server_status("hiatus"));
+		assert!(!is_server_status("cancelled"));
 	}
 
 	#[test]
