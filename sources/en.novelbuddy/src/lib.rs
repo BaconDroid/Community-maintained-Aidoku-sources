@@ -205,7 +205,11 @@ fn fetch_multi_status(
 				let mut filtered: Vec<Manga> = list_data
 					.items
 					.into_iter()
-					.filter(|item| item.status.as_deref() == Some(&**status))
+					.filter(|item| {
+						item.status
+							.as_deref()
+							.is_some_and(|s| s.eq_ignore_ascii_case(status))
+					})
 					.map(Manga::from)
 					.collect();
 				if list_data.pagination.has_next {
