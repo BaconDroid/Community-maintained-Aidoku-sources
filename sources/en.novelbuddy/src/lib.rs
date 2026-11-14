@@ -24,6 +24,24 @@ use settings::{
 
 const CONTENT_RATING_IDS: &[&str] = &["safe", "suggestive", "nsfw"];
 
+pub const BASE_URL: &str = "https://novelbuddy.me";
+pub const API_URL: &str = "https://api.novelbuddy.me";
+pub const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 \
+	 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
+
+const SORT_IDS: &[&str] = &[
+	"popular",
+	"latest",
+	"newest",
+	"rating",
+	"views",
+	"bookmarks",
+];
+
+const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
+
+const SERVER_STATUS_IDS: &[&str] = &["ongoing", "completed"];
+
 struct SearchContext {
 	qs: QueryParameters,
 	status_filter: Option<Vec<String>>,
@@ -355,24 +373,6 @@ fn merge_with_persistent(runtime: Option<Vec<String>>, persistent: Vec<String>) 
 		}
 	}
 }
-
-pub const BASE_URL: &str = "https://novelbuddy.me";
-pub const API_URL: &str = "https://api.novelbuddy.me";
-pub const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 \
-	 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
-
-const SORT_IDS: &[&str] = &[
-	"popular",
-	"latest",
-	"newest",
-	"rating",
-	"views",
-	"bookmarks",
-];
-
-const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
-
-const SERVER_STATUS_IDS: &[&str] = &["ongoing", "completed"];
 
 fn is_server_status(value: &str) -> bool {
 	SERVER_STATUS_IDS
