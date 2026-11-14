@@ -1,13 +1,14 @@
 use aidoku::{
-	Chapter, ContentRating, Manga, MangaStatus, Result,
+	AidokuError, Chapter, ContentRating, FilterValue, Manga, MangaPageResult, MangaStatus, Result,
 	alloc::{String, Vec, string::ToString},
+	helpers::uri::QueryParameters,
 	imports::{html::Html, net::Request, std::parse_date},
 	prelude::*,
 };
 use serde::de::DeserializeOwned;
 
 use crate::models::{
-	ApiResponse, BySlugData, ChapterListData, ChapterListItem, TitleDetail, TitleListItem,
+	ApiResponse, BySlugData, ChapterListData, ChapterListItem, ListData, TitleDetail, TitleListItem,
 };
 use crate::{API_URL, BASE_URL, USER_AGENT};
 
@@ -250,10 +251,245 @@ pub fn html_to_text(html: &str) -> String {
 		.unwrap_or_default()
 }
 
+pub const CONTENT_RATING_IDS: &[&str] = &["safe", "suggestive", "nsfw"];
+
+const SORT_IDS: &[&str] = &[
+	"popular",
+	"latest",
+	"newest",
+	"rating",
+	"views",
+	"bookmarks",
+];
+
+const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
+
+const SERVER_STATUS_IDS: &[&str] = &["ongoing", "completed"];
+
+pub struct SearchContext {
+	pub qs: QueryParameters,
+	pub status_filter: Option<Vec<String>>,
+	pub content_rating_filter: Option<Vec<String>>,
+}
+
+pub fn resolve_multi_select(
+	all_options: &[&'static str],
+	included: Vec<String>,
+	excluded: Vec<String>,
+) -> Vec<String> {
+	let lower_excluded: Vec<String> = excluded.iter().map(|e| e.to_lowercase()).collect();
+	let base: Vec<String> = if included.is_empty() {
+		all_options.iter().map(|s| (*s).into()).collect()
+	} else {
+		included
+	};
+	base.into_iter()
+		.filter(|s| !lower_excluded.contains(&s.to_lowercase()))
+		.collect()
+}
+
+pub fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
+	let mut qs = QueryParameters::new();
+	let mut has_sort = false;
+	let mut excluded_genres = crate::settings::hidden_genres();
+	let mut status_filter: Option<Vec<String>> = None;
+	let mut content_rating_filter: Option<Vec<String>> = None;
+
+	for filter in filters {
+		match filter {
+			FilterValue::Sort { index, .. } => {
+				if let Some(s) = SORT_IDS.get(index as usize) {
+					qs.push("sort", Some(*s));
+					has_sort = true;
+				}
+			}
+			FilterValue::MultiSelect {
+				id,
+				included,
+				excluded,
+			} if id == "status" => {
+				status_filter = Some(resolve_multi_select(STATUS_IDS, included, excluded));
+			}
+			FilterValue::MultiSelect {
+				id,
+				included,
+				excluded,
+			} if id == "contentRating" => {
+				content_rating_filter =
+					Some(resolve_multi_select(CONTENT_RATING_IDS, included, excluded));
+			}
+			FilterValue::MultiSelect {
+				id,
+				included,
+				excluded,
+			} if id == "genres" => {
+				for genre in &included {
+					if let Some(pos) = excluded_genres.iter().position(|g| g == genre) {
+						excluded_genres.swap_remove(pos);
+					}
+				}
+				if !included.is_empty() {
+					qs.push("genres", Some(&included.join(",")));
+				}
+				for genre in excluded {
+					if !excluded_genres.contains(&genre) {
+						excluded_genres.push(genre);
+					}
+				}
+			}
+			_ => {}
+		}
+	}
+
+	if !has_sort {
+		qs.push("sort", Some("popular"));
+	}
+	if !excluded_genres.is_empty() {
+		qs.push("exclude", Some(&excluded_genres.join(",")));
+	}
+
+	SearchContext {
+		qs,
+		status_filter,
+		content_rating_filter,
+	}
+}
+
+pub fn build_search_url(
+	ctx: &SearchContext,
+	query: Option<&str>,
+	page: i32,
+	status: Option<&str>,
+) -> String {
+	let mut qs = ctx.qs.clone();
+	if let Some(q) = query {
+		qs.push("q", Some(q));
+	}
+	if let Some(s) = status {
+		qs.push("status", Some(s));
+	}
+	format!("{API_URL}/titles/search?{qs}&page={}", page.max(1))
+}
+
+pub fn merge_with_persistent(runtime: Option<Vec<String>>, persistent: Vec<String>) -> Vec<String> {
+	match runtime {
+		None => persistent,
+		Some(mut values) => {
+			values.sort();
+			values.dedup();
+			values
+		}
+	}
+}
+
+pub fn is_server_status(value: &str) -> bool {
+	SERVER_STATUS_IDS
+		.iter()
+		.any(|supported| value.eq_ignore_ascii_case(supported))
+}
+
+fn rating_matches(rating: &str, content_rating: aidoku::ContentRating) -> bool {
+	matches!(
+		(rating, content_rating),
+		("safe", aidoku::ContentRating::Safe)
+			| ("suggestive", aidoku::ContentRating::Suggestive)
+			| ("nsfw", aidoku::ContentRating::NSFW)
+	)
+}
+
+pub fn filter_by_rating(entries: Vec<Manga>, ratings: &[String]) -> Vec<Manga> {
+	if ratings.is_empty() {
+		return entries;
+	}
+	entries
+		.into_iter()
+		.filter(|m| ratings.iter().any(|r| rating_matches(r, m.content_rating)))
+		.collect()
+}
+
+pub fn fetch_multi_status(
+	ctx: &SearchContext,
+	query: Option<&str>,
+	page: i32,
+	all_statuses: &[String],
+	all_ratings: &[String],
+	hide: bool,
+) -> Result<MangaPageResult> {
+	let mut all_entries: Vec<Manga> = Vec::new();
+	let mut any_has_next = false;
+	let mut first_error: Option<AidokuError> = None;
+	let mut success_count = 0usize;
+
+	for status in all_statuses {
+		let url = build_search_url(ctx, query, page, Some(status));
+		match request::<ListData>(&url) {
+			Ok(list_data) => {
+				let mut filtered: Vec<Manga> = list_data
+					.items
+					.into_iter()
+					.filter(|item| {
+						item.status
+							.as_deref()
+							.is_some_and(|s| s.eq_ignore_ascii_case(status))
+					})
+					.map(Manga::from)
+					.collect();
+				if list_data.pagination.has_next {
+					any_has_next = true;
+				}
+				all_entries.append(&mut filtered);
+				success_count += 1;
+			}
+			Err(e) => {
+				if first_error.is_none() {
+					first_error = Some(e);
+				}
+			}
+		}
+	}
+
+	if success_count == 0 {
+		if let Some(e) = first_error {
+			return Err(e);
+		}
+		bail!("all status requests failed");
+	}
+
+	if hide {
+		crate::mtl::retain_manga(&mut all_entries);
+	}
+	let mut entries = filter_by_rating(all_entries, all_ratings);
+	let mut seen: Vec<String> = Vec::new();
+	entries.retain(|m| {
+		if seen.contains(&m.key) {
+			false
+		} else {
+			seen.push(m.key.clone());
+			true
+		}
+	});
+	Ok(MangaPageResult {
+		entries,
+		has_next_page: any_has_next,
+	})
+}
+
+pub fn deep_link_slugs(path: &str) -> (&str, &str) {
+	let mut segments = path.split('/').filter(|s| !s.is_empty());
+	let series = segments.next().unwrap_or("");
+	let chapter = segments.next().unwrap_or("");
+	(series, chapter)
+}
+
+pub fn chapter_url_matches(url: &str, chapter_slug: &str) -> bool {
+	!chapter_slug.is_empty() && url.trim_end_matches('/').rsplit('/').next() == Some(chapter_slug)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use aidoku::alloc::string::ToString;
+	use aidoku::{ContentRating, alloc::vec};
 	use aidoku_test::aidoku_test;
 
 	#[aidoku_test]
@@ -384,5 +620,149 @@ mod tests {
 			series_path(r"https://evil.com\@novelbuddy.me/shadow-slave"),
 			None
 		);
+	}
+
+	#[aidoku_test]
+	fn rating_matches_the_matching_tier_only() {
+		assert!(rating_matches("safe", ContentRating::Safe));
+		assert!(rating_matches("suggestive", ContentRating::Suggestive));
+		assert!(rating_matches("nsfw", ContentRating::NSFW));
+		assert!(!rating_matches("safe", ContentRating::Suggestive));
+		assert!(!rating_matches("nsfw", ContentRating::Safe));
+		assert!(!rating_matches("suggestive", ContentRating::NSFW));
+	}
+
+	#[aidoku_test]
+	fn filter_by_rating_empty_selection_returns_all() {
+		let entries = vec![
+			Manga {
+				key: "1".into(),
+				content_rating: ContentRating::Safe,
+				..Default::default()
+			},
+			Manga {
+				key: "2".into(),
+				content_rating: ContentRating::NSFW,
+				..Default::default()
+			},
+		];
+		assert_eq!(filter_by_rating(entries, &[]).len(), 2);
+	}
+
+	#[aidoku_test]
+	fn filter_by_rating_single_selection() {
+		let entries = vec![
+			Manga {
+				key: "1".into(),
+				content_rating: ContentRating::Safe,
+				..Default::default()
+			},
+			Manga {
+				key: "2".into(),
+				content_rating: ContentRating::Suggestive,
+				..Default::default()
+			},
+		];
+		let filtered = filter_by_rating(entries, &["suggestive".into()]);
+		assert_eq!(filtered.len(), 1);
+		assert_eq!(filtered[0].key, "2");
+	}
+
+	#[aidoku_test]
+	fn filter_by_rating_suggestive_and_nsfw_selection() {
+		let entries = vec![
+			Manga {
+				key: "1".into(),
+				content_rating: ContentRating::Safe,
+				..Default::default()
+			},
+			Manga {
+				key: "2".into(),
+				content_rating: ContentRating::Suggestive,
+				..Default::default()
+			},
+			Manga {
+				key: "3".into(),
+				content_rating: ContentRating::NSFW,
+				..Default::default()
+			},
+		];
+		let filtered = filter_by_rating(entries, &["suggestive".into(), "nsfw".into()]);
+		assert_eq!(filtered.len(), 2);
+	}
+
+	#[aidoku_test]
+	fn resolve_multi_select_resolves_inclusions_and_exclusions() {
+		const ALL: &[&str] = &["safe", "suggestive", "nsfw"];
+		assert_eq!(
+			resolve_multi_select(ALL, Vec::new(), Vec::new()),
+			vec!["safe", "suggestive", "nsfw"]
+		);
+		assert_eq!(
+			resolve_multi_select(ALL, vec!["nsfw".into()], Vec::new()),
+			vec!["nsfw"]
+		);
+		assert_eq!(
+			resolve_multi_select(ALL, vec!["safe".into(), "nsfw".into()], vec!["NSFW".into()]),
+			vec!["safe"]
+		);
+		assert_eq!(
+			resolve_multi_select(ALL, Vec::new(), ALL.iter().map(|s| (*s).into()).collect()),
+			Vec::<String>::new()
+		);
+	}
+
+	#[aidoku_test]
+	fn merge_with_persistent_prefers_the_runtime_selection() {
+		assert_eq!(
+			merge_with_persistent(None, vec!["safe".into()]),
+			vec!["safe"]
+		);
+		assert_eq!(
+			merge_with_persistent(Some(vec!["nsfw".into()]), vec!["safe".into()]),
+			vec!["nsfw"]
+		);
+		assert_eq!(
+			merge_with_persistent(Some(Vec::new()), vec!["safe".into()]),
+			Vec::<String>::new()
+		);
+	}
+
+	#[aidoku_test]
+	fn server_status_rejects_unsupported_values() {
+		assert!(is_server_status("ongoing"));
+		assert!(is_server_status("Completed"));
+		assert!(!is_server_status("hiatus"));
+		assert!(!is_server_status("cancelled"));
+	}
+
+	#[aidoku_test]
+	fn deep_link_slugs_take_first_two_segments() {
+		assert_eq!(
+			deep_link_slugs("shadow-slave/chapter-1/extra"),
+			("shadow-slave", "chapter-1")
+		);
+		assert_eq!(deep_link_slugs("shadow-slave"), ("shadow-slave", ""));
+		assert_eq!(deep_link_slugs(""), ("", ""));
+	}
+
+	#[aidoku_test]
+	fn chapter_url_matches_final_segment_only() {
+		assert!(chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave/chapter-1",
+			"chapter-1"
+		));
+		assert!(chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave/chapter-1/",
+			"chapter-1"
+		));
+		assert!(!chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave/chapter-10",
+			"chapter-1"
+		));
+		assert!(!chapter_url_matches(
+			"https://novelbuddy.me/shadow-slave",
+			""
+		));
 	}
 }
