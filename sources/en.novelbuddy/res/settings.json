@@ -1,6 +1,53 @@
 [
 	{
 		"type": "group",
+		"title": "Content",
+		"items": [
+			{
+				"type": "multi-select",
+				"key": "status",
+				"title": "Status",
+				"titles": [
+					"Ongoing",
+					"Completed",
+					"Hiatus",
+					"Cancelled"
+				],
+				"values": [
+					"ongoing",
+					"completed",
+					"hiatus",
+					"cancelled"
+				],
+				"default": [],
+				"refreshes": [
+					"content"
+				]
+			},
+			{
+				"type": "multi-select",
+				"key": "contentRating",
+				"title": "Content Rating",
+				"titles": [
+					"Safe",
+					"Suggestive",
+					"NSFW"
+				],
+				"values": [
+					"safe",
+					"suggestive",
+					"nsfw"
+				],
+				"default": [],
+				"refreshes": [
+					"content"
+				]
+			}
+		],
+		"footer": "Persistent selections apply to search; Content Rating also applies to listings. Empty means all."
+	},
+	{
+		"type": "group",
 		"title": "Content Filters",
 		"items": [
 			{
@@ -106,53 +153,6 @@
 			}
 		],
 		"footer": "Novels tagged with the selected genres are excluded from search results."
-	},
-	{
-		"type": "group",
-		"title": "Content",
-		"items": [
-			{
-				"type": "multi-select",
-				"key": "status",
-				"title": "Status",
-				"titles": [
-					"Ongoing",
-					"Completed",
-					"Hiatus",
-					"Cancelled"
-				],
-				"values": [
-					"ongoing",
-					"completed",
-					"hiatus",
-					"cancelled"
-				],
-				"default": [],
-				"refreshes": [
-					"content"
-				]
-			},
-			{
-				"type": "multi-select",
-				"key": "contentRating",
-				"title": "Content Rating",
-				"titles": [
-					"Safe",
-					"Suggestive",
-					"NSFW"
-				],
-				"values": [
-					"safe",
-					"suggestive",
-					"nsfw"
-				],
-				"default": [],
-				"refreshes": [
-					"content"
-				]
-			}
-		],
-		"footer": "Persistent selections apply to search; Content Rating also applies to listings. Empty means all."
 	},
 	{
 		"type": "group",
