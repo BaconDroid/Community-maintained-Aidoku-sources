@@ -154,6 +154,12 @@ pub fn list_url(
 	Some(format!("{BASE_URL}/api/series?{qs}"))
 }
 
+/// An empty selection means every tier, which pins nothing.
+pub fn selected_ratings(filters: &[FilterValue]) -> Vec<&'static str> {
+	let (included, excluded) = multi_select(filters, "contentRating");
+	effective(CONTENT_RATINGS, included, excluded).unwrap_or_default()
+}
+
 pub fn hidden_genres_to_exclude(hidden: Vec<String>, included: &[String]) -> Vec<String> {
 	hidden
 		.into_iter()
@@ -224,7 +230,12 @@ pub fn effective_offset(server_offset: u32, requested_offset: u32) -> u32 {
 	}
 }
 
-pub fn manga_page_result(data: ListResponse, offset: u32, limit: u32) -> MangaPageResult {
+pub fn manga_page_result(
+	data: ListResponse,
+	offset: u32,
+	limit: u32,
+	pinned: Option<ContentRating>,
+) -> MangaPageResult {
 	let response_offset = effective_offset(data.offset, offset);
 	let has_next_page = has_next(
 		data.items.len(),
@@ -233,12 +244,27 @@ pub fn manga_page_result(data: ListResponse, offset: u32, limit: u32) -> MangaPa
 		effective_limit(data.limit, limit),
 	);
 	MangaPageResult {
-		entries: data.items.into_iter().map(manga_from_list).collect(),
+		entries: data
+			.items
+			.into_iter()
+			.map(|item| manga_from_list(item, pinned))
+			.collect(),
 		has_next_page,
 	}
 }
 
-pub fn manga_from_list(item: ListItem) -> Manga {
+/// When the request pins a single tier the server returns nothing else, so every
+/// entry carries that tier instead of falling back to the `is_nsfw` binary.
+pub fn pinned_rating(ratings: &[&str]) -> Option<ContentRating> {
+	match ratings {
+		["safe"] => Some(ContentRating::Safe),
+		["suggestive"] => Some(ContentRating::Suggestive),
+		["erotica"] | ["pornographic"] => Some(ContentRating::NSFW),
+		_ => None,
+	}
+}
+
+pub fn manga_from_list(item: ListItem, pinned: Option<ContentRating>) -> Manga {
 	let content_type = ContentType::from_list_item(item.medium.as_deref(), item.kind.as_deref());
 	let slug = item.slug;
 	let key = deep_link_manga_key(content_type, &slug);
@@ -248,7 +274,7 @@ pub fn manga_from_list(item: ListItem) -> Manga {
 		title: item.title,
 		cover: item.cover_url,
 		url,
-		content_rating: content_rating(item.is_nsfw),
+		content_rating: pinned.unwrap_or_else(|| content_rating(item.is_nsfw)),
 		status: item.status.as_deref().map(parse_status).unwrap_or_default(),
 		..Default::default()
 	}
@@ -258,7 +284,13 @@ pub fn manga_from_detail(detail: Detail, content_type: ContentType) -> Manga {
 	let slug = detail.slug;
 	let key = deep_link_manga_key(content_type, &slug);
 	let url = Some(format!("{BASE_URL}{}/{slug}", content_type.web_base()));
-	let content_rating = content_rating(detail.is_nsfw);
+	let content_rating = if detail.is_nsfw {
+		ContentRating::NSFW
+	} else if rated_suggestive(&detail.title, &slug) {
+		ContentRating::Suggestive
+	} else {
+		ContentRating::Safe
+	};
 	let mut tags = Vec::new();
 	for name in detail.genres.into_iter().map(|g| g.name).chain(
 		detail
@@ -331,6 +363,20 @@ pub fn content_rating(is_nsfw: bool) -> ContentRating {
 	} else {
 		ContentRating::Safe
 	}
+}
+
+/// `is_nsfw` cannot separate safe from suggestive, but the server can: a title
+/// appears under `content_rating=suggestive` only when the site rates it so.
+pub fn rated_suggestive(title: &str, slug: &str) -> bool {
+	let mut qs = QueryParameters::new();
+	qs.push("q", Some(title));
+	qs.push("content_rating", Some("suggestive"));
+	qs.push("limit", Some("30"));
+	let url = format!("{BASE_URL}/api/series?{qs}");
+	matches!(
+		request::<ListResponse>(&url),
+		Ok(data) if data.items.iter().any(|item| item.slug == slug)
+	)
 }
 
 pub fn parse_status(status: &str) -> MangaStatus {
@@ -697,21 +743,69 @@ mod tests {
 			medium: medium.map(Into::into),
 			kind: kind.map(Into::into),
 		};
-		let novel = manga_from_list(item(Some("novel"), None));
+		let novel = manga_from_list(item(Some("novel"), None), None);
 		assert_eq!(novel.key, "slug");
 		assert_eq!(
 			novel.url.as_deref(),
 			Some("https://chikari.moe/novels/slug")
 		);
 		assert_eq!(novel.content_rating, ContentRating::NSFW);
-		let comic = manga_from_list(item(Some("comic"), None));
+		let comic = manga_from_list(item(Some("comic"), None), None);
 		assert_eq!(comic.key, "series:slug");
 		assert_eq!(
 			comic.url.as_deref(),
 			Some("https://chikari.moe/series/slug")
 		);
-		let fallback = manga_from_list(item(None, Some("novel")));
+		let fallback = manga_from_list(item(None, Some("novel")), None);
 		assert_eq!(fallback.key, "slug");
+	}
+
+	#[aidoku_test]
+	fn pinned_rating_covers_each_single_tier() {
+		assert_eq!(pinned_rating(&["safe"]), Some(ContentRating::Safe));
+		assert_eq!(
+			pinned_rating(&["suggestive"]),
+			Some(ContentRating::Suggestive)
+		);
+		assert_eq!(pinned_rating(&["erotica"]), Some(ContentRating::NSFW));
+		assert_eq!(pinned_rating(&["pornographic"]), Some(ContentRating::NSFW));
+	}
+
+	#[aidoku_test]
+	fn pinned_rating_needs_exactly_one_tier() {
+		assert_eq!(pinned_rating(&["safe", "suggestive"]), None);
+		assert_eq!(pinned_rating(&[]), None);
+	}
+
+	#[aidoku_test]
+	fn pinned_rating_overrides_the_nsfw_flag() {
+		let item = crate::models::ListItem {
+			slug: "slug".into(),
+			title: "Title".into(),
+			cover_url: None,
+			status: None,
+			is_nsfw: false,
+			medium: None,
+			kind: None,
+		};
+		let pinned = manga_from_list(item, Some(ContentRating::Suggestive));
+		assert_eq!(pinned.content_rating, ContentRating::Suggestive);
+	}
+
+	#[aidoku_test]
+	fn selected_ratings_reads_included_and_excluded() {
+		let filters = [FilterValue::MultiSelect {
+			id: "contentRating".into(),
+			included: vec!["suggestive".into()],
+			excluded: vec![],
+		}];
+		assert_eq!(selected_ratings(&filters), vec!["suggestive"]);
+		let filters = [FilterValue::MultiSelect {
+			id: "contentRating".into(),
+			included: vec![],
+			excluded: vec!["safe".into(), "suggestive".into()],
+		}];
+		assert_eq!(selected_ratings(&filters), vec!["erotica", "pornographic"]);
 	}
 
 	#[aidoku_test]
