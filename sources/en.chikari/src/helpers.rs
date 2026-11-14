@@ -284,13 +284,7 @@ pub fn manga_from_detail(detail: Detail, content_type: ContentType) -> Manga {
 	let slug = detail.slug;
 	let key = deep_link_manga_key(content_type, &slug);
 	let url = Some(format!("{BASE_URL}{}/{slug}", content_type.web_base()));
-	let content_rating = if detail.is_nsfw {
-		ContentRating::NSFW
-	} else if rated_suggestive(&detail.title, &slug) {
-		ContentRating::Suggestive
-	} else {
-		ContentRating::Safe
-	};
+	let content_rating = detail_rating(detail.is_nsfw, rated_suggestive(&detail.title, &slug).ok());
 	let mut tags = Vec::new();
 	for name in detail.genres.into_iter().map(|g| g.name).chain(
 		detail
@@ -367,16 +361,27 @@ pub fn content_rating(is_nsfw: bool) -> ContentRating {
 
 /// `is_nsfw` cannot separate safe from suggestive, but the server can: a title
 /// appears under `content_rating=suggestive` only when the site rates it so.
-pub fn rated_suggestive(title: &str, slug: &str) -> bool {
+pub fn rated_suggestive(title: &str, slug: &str) -> Result<bool> {
 	let mut qs = QueryParameters::new();
 	qs.push("q", Some(title));
 	qs.push("content_rating", Some("suggestive"));
 	qs.push("limit", Some("30"));
 	let url = format!("{BASE_URL}/api/series?{qs}");
-	matches!(
-		request::<ListResponse>(&url),
-		Ok(data) if data.items.iter().any(|item| item.slug == slug)
-	)
+	let data: ListResponse = request(&url)?;
+	Ok(data.items.iter().any(|item| item.slug == slug))
+}
+
+/// `None` means the lookup failed and establishes nothing, so the rating stays
+/// `Unknown` rather than claiming `Safe`.
+pub fn detail_rating(is_nsfw: bool, suggestive: Option<bool>) -> ContentRating {
+	if is_nsfw {
+		return ContentRating::NSFW;
+	}
+	match suggestive {
+		Some(true) => ContentRating::Suggestive,
+		Some(false) => ContentRating::Safe,
+		None => ContentRating::Unknown,
+	}
 }
 
 pub fn parse_status(status: &str) -> MangaStatus {
@@ -806,6 +811,23 @@ mod tests {
 			excluded: vec!["safe".into(), "suggestive".into()],
 		}];
 		assert_eq!(selected_ratings(&filters), vec!["erotica", "pornographic"]);
+	}
+
+	#[aidoku_test]
+	fn detail_rating_maps_a_confirmed_lookup() {
+		assert_eq!(detail_rating(false, Some(true)), ContentRating::Suggestive);
+		assert_eq!(detail_rating(false, Some(false)), ContentRating::Safe);
+	}
+
+	#[aidoku_test]
+	fn detail_rating_keeps_a_failed_lookup_unknown() {
+		assert_eq!(detail_rating(false, None), ContentRating::Unknown);
+	}
+
+	#[aidoku_test]
+	fn detail_rating_trusts_the_nsfw_flag_over_the_lookup() {
+		assert_eq!(detail_rating(true, Some(false)), ContentRating::NSFW);
+		assert_eq!(detail_rating(true, None), ContentRating::NSFW);
 	}
 
 	#[aidoku_test]
