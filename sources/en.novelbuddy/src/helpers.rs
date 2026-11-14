@@ -300,7 +300,6 @@ mod tests {
 			Some("VYPGVZ8z".to_string())
 		);
 		assert_eq!(parse_id_from_canonical("/titles/garbage"), None);
-		// The length check is what keeps the slug from parsing as an id.
 		assert_eq!(parse_id_from_canonical("/titles/shadow-slave"), None);
 		assert_eq!(parse_id_from_canonical("/titles/ab-1234567"), None);
 	}
