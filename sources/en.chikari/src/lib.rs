@@ -16,8 +16,8 @@ mod watermark;
 
 use helpers::{
 	ContentType, apply_settings, chapter_deep_link, decode_manga_key, deep_link_manga_key,
-	fetch_chapters, list_url, manga_from_detail, manga_page_result, novel_text_pages, request,
-	series_image_pages, valid_number, valid_slug,
+	fetch_chapters, list_url, manga_from_detail, manga_page_result, novel_text_pages,
+	pinned_rating, request, selected_ratings, series_image_pages, valid_number, valid_slug,
 };
 use models::{ChapterBody, ListResponse, SeriesChapterBody};
 
@@ -69,7 +69,12 @@ impl Source for Chikari {
 			});
 		};
 		let data: ListResponse = request(&url)?;
-		let mut result = manga_page_result(data, offset, limit);
+		let mut result = manga_page_result(
+			data,
+			offset,
+			limit,
+			pinned_rating(&selected_ratings(&filters)),
+		);
 		if hide {
 			mtl::retain_manga(&mut result.entries);
 		}
@@ -140,7 +145,12 @@ impl ListingProvider for Chikari {
 			});
 		};
 		let data: ListResponse = request(&url)?;
-		let mut result = manga_page_result(data, offset, LIST_PAGE_SIZE);
+		let mut result = manga_page_result(
+			data,
+			offset,
+			LIST_PAGE_SIZE,
+			pinned_rating(&selected_ratings(&filters)),
+		);
 		if settings::hide_mtl() {
 			mtl::retain_manga(&mut result.entries);
 		}
