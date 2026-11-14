@@ -245,17 +245,9 @@ pub fn manga_from_list(item: ListItem) -> Manga {
 		title: item.title,
 		cover: item.cover_url,
 		url,
-		content_rating: list_content_rating(item.is_nsfw),
+		content_rating: content_rating(item.is_nsfw),
 		status: item.status.as_deref().map(parse_status).unwrap_or_default(),
 		..Default::default()
-	}
-}
-
-pub fn list_content_rating(is_nsfw: bool) -> ContentRating {
-	if is_nsfw {
-		ContentRating::NSFW
-	} else {
-		ContentRating::Safe
 	}
 }
 
@@ -263,7 +255,7 @@ pub fn manga_from_detail(detail: Detail, content_type: ContentType) -> Manga {
 	let slug = detail.slug;
 	let key = deep_link_manga_key(content_type, &slug);
 	let url = Some(format!("{BASE_URL}{}/{slug}", content_type.web_base()));
-	let content_rating = content_rating(detail.is_nsfw, &detail.genres, &detail.tags);
+	let content_rating = content_rating(detail.is_nsfw);
 	let mut tags = Vec::new();
 	for name in detail.genres.into_iter().map(|g| g.name).chain(
 		detail
@@ -330,39 +322,12 @@ pub fn viewer_for_series(reading_mode: Option<&str>, kind: Option<&str>) -> View
 	}
 }
 
-pub fn content_rating(
-	is_nsfw: bool,
-	genres: &[crate::models::Named],
-	tags: &[crate::models::Tag],
-) -> ContentRating {
+pub fn content_rating(is_nsfw: bool) -> ContentRating {
 	if is_nsfw {
-		return ContentRating::NSFW;
-	}
-	let suggestive = genres
-		.iter()
-		.map(|genre| genre.name.as_str())
-		.chain(tags.iter().map(|tag| tag.name.as_str()))
-		.any(is_suggestive_signal);
-	if suggestive {
-		ContentRating::Suggestive
+		ContentRating::NSFW
 	} else {
 		ContentRating::Safe
 	}
-}
-
-fn is_suggestive_signal(value: &str) -> bool {
-	const SUGGESTIVE_TAGS: &[&str] = &[
-		"borderline h",
-		"ecchi",
-		"erotica",
-		"lolicon",
-		"mature",
-		"nudity",
-		"shotacon",
-	];
-	SUGGESTIVE_TAGS
-		.iter()
-		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
 }
 
 pub fn parse_status(status: &str) -> MangaStatus {
