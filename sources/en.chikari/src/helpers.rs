@@ -364,13 +364,21 @@ pub fn content_rating(is_nsfw: bool) -> ContentRating {
 
 /// `is_nsfw` cannot separate safe from suggestive, but the server can: a title
 /// appears under `content_rating=suggestive` only when the site rates it so.
-pub fn rated_suggestive(title: &str, slug: &str, content_type: ContentType) -> Result<bool> {
+/// `q=` only searches within the types it is given, and the API hides novels
+/// unless `type` is present, so the lookup sends every type.
+pub fn suggestive_lookup_url(title: &str) -> String {
 	let mut qs = QueryParameters::new();
 	qs.push("q", Some(title));
 	qs.push("content_rating", Some("suggestive"));
 	qs.push("limit", Some("30"));
-	let url = format!("{BASE_URL}/api/series?{qs}");
-	let data: ListResponse = request(&url)?;
+	for kind in TYPES {
+		qs.push("type", Some(kind));
+	}
+	format!("{BASE_URL}/api/series?{qs}")
+}
+
+pub fn rated_suggestive(title: &str, slug: &str, content_type: ContentType) -> Result<bool> {
+	let data: ListResponse = request(&suggestive_lookup_url(title))?;
 	Ok(data.items.iter().any(|item| {
 		item.slug == slug
 			&& ContentType::from_list_item(item.medium.as_deref(), item.kind.as_deref())
@@ -835,6 +843,18 @@ mod tests {
 	fn detail_rating_trusts_the_nsfw_flag_over_the_lookup() {
 		assert_eq!(detail_rating(true, Some(false)), ContentRating::NSFW);
 		assert_eq!(detail_rating(true, None), ContentRating::NSFW);
+	}
+
+	#[aidoku_test]
+	fn suggestive_lookup_sends_every_type() {
+		let url = suggestive_lookup_url("Some Title");
+		assert!(url.contains("content_rating=suggestive"));
+		for kind in TYPES {
+			assert!(
+				url.contains(&format!("type={kind}")),
+				"lookup must ask for {kind}: q= alone hides novels"
+			);
+		}
 	}
 
 	#[aidoku_test]
