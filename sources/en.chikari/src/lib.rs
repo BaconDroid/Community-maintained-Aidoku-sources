@@ -1,8 +1,8 @@
 #![no_std]
 use aidoku::{
 	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, PageContent, Result, Source,
-	alloc::{String, Vec, vec},
+	MangaPageResult, Page, Result, Source,
+	alloc::{String, Vec},
 	imports::std::send_partial_result,
 	prelude::*,
 };
@@ -15,8 +15,9 @@ mod settings;
 mod watermark;
 
 use helpers::{
-	ContentType, body_to_text, decode_manga_key, deep_link_manga_key, fetch_chapters, list_url,
-	manga_from_detail, manga_page_result, request, valid_number, valid_slug,
+	ContentType, apply_settings, chapter_deep_link, decode_manga_key, deep_link_manga_key,
+	fetch_chapters, list_url, manga_from_detail, manga_page_result, novel_text_pages, request,
+	series_image_pages, valid_number, valid_slug,
 };
 use models::{ChapterBody, ListResponse, SeriesChapterBody};
 
@@ -171,96 +172,11 @@ impl DeepLinkHandler for Chikari {
 
 register_source!(Chikari, ListingProvider, DeepLinkHandler);
 
-fn apply_settings(filters: Vec<FilterValue>) -> Vec<FilterValue> {
-	let hidden = settings::hidden_genres();
-	let selected_types = settings::type_filters();
-	let selected_status = settings::status_filter();
-	let selected_ratings = settings::content_rating_filter();
-	if hidden.is_empty()
-		&& selected_types.is_empty()
-		&& selected_status.is_empty()
-		&& selected_ratings.is_empty()
-	{
-		return filters;
-	}
-	let mut filters = filters;
-	if !hidden.is_empty() {
-		if let Some(FilterValue::MultiSelect {
-			included, excluded, ..
-		}) = filters
-			.iter_mut()
-			.find(|filter| matches!(filter, FilterValue::MultiSelect { id, .. } if id == "genres"))
-		{
-			excluded.extend(helpers::hidden_genres_to_exclude(hidden, included));
-		} else {
-			filters.push(FilterValue::MultiSelect {
-				id: "genres".into(),
-				included: Vec::new(),
-				excluded: hidden,
-			});
-		}
-	}
-	push_persistent_selection(&mut filters, "types", selected_types);
-	push_persistent_selection(&mut filters, "status", selected_status);
-	push_persistent_selection(&mut filters, "contentRating", selected_ratings);
-	filters
-}
-
-fn push_persistent_selection(
-	filters: &mut Vec<FilterValue>,
-	id: &str,
-	selected: Vec<&'static str>,
-) {
-	if selected.is_empty() || has_filter(filters, id) {
-		return;
-	}
-	filters.push(FilterValue::MultiSelect {
-		id: id.into(),
-		included: selected.into_iter().map(Into::into).collect(),
-		excluded: Vec::new(),
-	});
-}
-
-fn has_filter(filters: &[FilterValue], id: &str) -> bool {
-	filters
-		.iter()
-		.any(|filter| matches!(filter, FilterValue::MultiSelect { id: found, .. } if found == id))
-}
-
-fn novel_text_pages(data: ChapterBody) -> Result<Vec<Page>> {
-	let text = if data.locked || data.body.trim().is_empty() {
-		"This chapter is locked (early access)".into()
-	} else {
-		body_to_text(data.body)?
-	};
-	Ok(vec![Page {
-		content: PageContent::text(text),
-		..Default::default()
-	}])
-}
-
-fn series_image_pages(pages: Vec<String>) -> Vec<Page> {
-	pages
-		.into_iter()
-		.map(|url| Page {
-			content: PageContent::url(url),
-			..Default::default()
-		})
-		.collect()
-}
-
-fn chapter_deep_link(manga_key: String, number: &str) -> Option<DeepLinkResult> {
-	let number: f32 = number.parse().ok()?;
-	Some(DeepLinkResult::Chapter {
-		manga_key,
-		key: helpers::chapter_key(number),
-	})
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::helpers::chapter_key;
+	use aidoku::PageContent;
 	use aidoku_test::aidoku_test;
 	#[aidoku_test]
 	fn search_finds_shadow_slave() {
