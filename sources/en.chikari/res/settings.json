@@ -1,74 +1,6 @@
 [
 	{
 		"type": "group",
-		"title": "Content",
-		"items": [
-			{
-				"type": "multi-select",
-				"key": "types",
-				"title": "Types",
-				"titles": [
-					"Manga",
-					"Manhwa",
-					"Manhua",
-					"OEL",
-					"Novel"
-				],
-				"values": [
-					"manga",
-					"manhwa",
-					"manhua",
-					"oel",
-					"novel"
-				],
-				"default": [],
-				"refreshes": ["content"]
-			},
-			{
-				"type": "multi-select",
-				"key": "ratings",
-				"title": "Content Rating",
-				"titles": [
-					"Safe",
-					"Suggestive",
-					"Erotica",
-					"Pornographic"
-				],
-				"values": [
-					"safe",
-					"suggestive",
-					"erotica",
-					"pornographic"
-				],
-				"default": [],
-				"refreshes": ["content"]
-			},
-			{
-				"type": "multi-select",
-				"key": "status",
-				"title": "Status",
-				"titles": [
-					"Releasing",
-					"Completed",
-					"Hiatus",
-					"Cancelled",
-					"Upcoming"
-				],
-				"values": [
-					"releasing",
-					"completed",
-					"hiatus",
-					"cancelled",
-					"upcoming"
-				],
-				"default": [],
-				"refreshes": ["content"]
-			}
-		],
-		"footer": "Each selection applies when its matching filter is absent. Empty means all."
-	},
-	{
-		"type": "group",
 		"title": "Content Filters",
 		"items": [
 			{
@@ -172,6 +104,74 @@
 			}
 		],
 		"footer": "Titles with any selected genre are excluded from search results."
+	},
+	{
+		"type": "group",
+		"title": "Content",
+		"items": [
+			{
+				"type": "multi-select",
+				"key": "types",
+				"title": "Types",
+				"titles": [
+					"Manga",
+					"Manhwa",
+					"Manhua",
+					"OEL",
+					"Novel"
+				],
+				"values": [
+					"manga",
+					"manhwa",
+					"manhua",
+					"oel",
+					"novel"
+				],
+				"default": [],
+				"refreshes": ["content"]
+			},
+			{
+				"type": "multi-select",
+				"key": "status",
+				"title": "Status",
+				"titles": [
+					"Releasing",
+					"Completed",
+					"Hiatus",
+					"Cancelled",
+					"Upcoming"
+				],
+				"values": [
+					"releasing",
+					"completed",
+					"hiatus",
+					"cancelled",
+					"upcoming"
+				],
+				"default": [],
+				"refreshes": ["content"]
+			},
+			{
+				"type": "multi-select",
+				"key": "contentRating",
+				"title": "Content Rating",
+				"titles": [
+					"Safe",
+					"Suggestive",
+					"Erotica",
+					"Pornographic"
+				],
+				"values": [
+					"safe",
+					"suggestive",
+					"erotica",
+					"pornographic"
+				],
+				"default": [],
+				"refreshes": ["content"]
+			}
+		],
+		"footer": "Each selection applies when its matching filter is absent. Empty means all."
 	},
 	{
 		"type": "group",
