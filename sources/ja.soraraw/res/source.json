@@ -2,13 +2,11 @@
 	"info": {
 		"id": "ja.soraraw",
 		"name": "Soraraw",
-		"version": 5,
+		"version": 9,
 		"url": "https://soraraw.com",
 		"contentRating": 2,
-		"languages": [
-			"ja"
-		],
-		"minAppVersion": "0.9"
+		"languages": ["ja"],
+		"minAppVersion": "0.9.0"
 	},
 	"listings": [
 		{
@@ -16,12 +14,12 @@
 			"name": "新着"
 		},
 		{
-			"id": "rising",
-			"name": "急上昇"
-		},
-		{
 			"id": "trending",
 			"name": "ランキング"
+		},
+		{
+			"id": "rising",
+			"name": "急上昇"
 		},
 		{
 			"id": "lifetime",
@@ -30,6 +28,6 @@
 	],
 	"config": {
 		"supportsAuthorSearch": true,
-		"hidesFiltersWhileSearching": true
+		"supportsTagSearch": true
 	}
 }

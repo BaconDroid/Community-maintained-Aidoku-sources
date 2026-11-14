@@ -164,16 +164,18 @@ pub trait Impl {
 				} else {
 					ContentRating::Safe
 				};
-			manga.viewer = details_element
-				.select_first(&params.series_type_selector)
-				.and_then(|el| el.text())
-				.map(|text| match text.to_lowercase().as_str() {
-					"manga" | "one-shot" | "oneshot" | "doujinshi" => Viewer::RightToLeft,
-					"manhua" | "manhwa" => Viewer::Webtoon,
-					"comic" => Viewer::LeftToRight,
-					_ => Viewer::Unknown,
-				})
-				.unwrap_or_default();
+			manga.viewer = params.viewer_override.unwrap_or_else(|| {
+				details_element
+					.select_first(&params.series_type_selector)
+					.and_then(|el| el.text())
+					.map(|text| match text.to_lowercase().as_str() {
+						"manga" | "one-shot" | "oneshot" | "doujinshi" => Viewer::RightToLeft,
+						"manhua" | "manhwa" => Viewer::Webtoon,
+						"comic" => Viewer::LeftToRight,
+						_ => Viewer::Unknown,
+					})
+					.unwrap_or_default()
+			});
 
 			send_partial_result(&manga);
 		}
@@ -281,6 +283,17 @@ pub trait Impl {
 		let url = format!("{}{}", params.base_url, chapter.key);
 		let response = Request::get(&url)?.string()?;
 		let html = Html::parse_fragment_with_url(&response, &url)?;
+
+		if response.contains("\"is_novel\":true") {
+			let text = helpers::novel_text(&html);
+			if text.is_empty() {
+				bail!("No text found");
+			}
+			return Ok(vec![Page {
+				content: PageContent::text(text),
+				..Default::default()
+			}]);
+		}
 
 		let pages: Vec<Page> = html
 			.select("div#readerarea img")

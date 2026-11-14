@@ -1,8 +1,8 @@
 {
 	"info": {
 		"id": "en.novelarchive",
-		"name": "NovelArchive",
-		"version": 2,
+		"name": "Novel Archive",
+		"version": 1,
 		"url": "https://novelarchive.st",
 		"contentRating": 1,
 		"languages": [
@@ -12,16 +12,19 @@
 	},
 	"listings": [
 		{
-			"id": "trending",
-			"name": "Trending"
+			"id": "popular",
+			"name": "Popular"
+		},
+		{
+			"id": "rating",
+			"name": "Top Rated"
 		},
 		{
 			"id": "recent",
 			"name": "Recently Added"
-		},
-		{
-			"id": "recently-updated",
-			"name": "Recently Updated"
 		}
-	]
+	],
+	"config": {
+		"supportsTagSearch": true
+	}
 }

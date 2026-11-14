@@ -2,12 +2,13 @@
 	"info": {
 		"id": "ru.desu",
 		"name": "Desu",
-		"version": 6,
+		"version": 8,
 		"url": "https://desu.uno",
 		"contentRating": 2,
 		"languages": [
 			"ru"
 		],
-		"breakingChangeVersion": 5
+		"breakingChangeVersion": 5,
+		"minAppVersion": "0.7.1"
 	}
 }

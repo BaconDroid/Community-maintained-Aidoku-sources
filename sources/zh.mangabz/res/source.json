@@ -2,10 +2,11 @@
 	"info": {
 		"id": "zh.mangabz",
 		"name": "Māngabz",
-		"version": 5,
+		"version": 6,
 		"url": "https://mangabz.com",
 		"contentRating": 1,
-		"languages": ["zh"]
+		"languages": ["zh"],
+		"minAppVersion": "0.7.1"
 	},
 	"config": {
 		"hidesFiltersWhileSearching": true,

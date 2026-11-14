@@ -29,6 +29,12 @@ pub fn apply_headers(request: Request) -> Request {
 		)
 }
 
+/// The `/api/...` endpoints return JSON; pin `Accept` so a content-negotiating
+/// backend never answers these requests with an HTML page.
+pub fn apply_api_headers(request: Request) -> Request {
+	apply_headers(request).header("Accept", "application/json")
+}
+
 fn format_errors(errors: Option<Vec<DesuError>>) -> String {
 	errors
 		.map(|errs| {
@@ -43,7 +49,7 @@ fn format_errors(errors: Option<Vec<DesuError>>) -> String {
 
 pub fn fetch_by_id(id: &str) -> Result<DesuItem> {
 	let url = format!("{}/{}", get_base_api_url(), id);
-	let response = apply_headers(Request::get(url)?).json_owned::<DesuMangaResponse>()?;
+	let response = apply_api_headers(Request::get(url)?).json_owned::<DesuMangaResponse>()?;
 
 	if let Some(res) = response.manga {
 		Ok(res)
@@ -58,7 +64,7 @@ pub fn fetch_by_id(id: &str) -> Result<DesuItem> {
 
 pub fn fetch_chapters(id: &str) -> Result<Vec<DesuChapter>> {
 	let url = format!("{}/{}/chapters", get_base_api_url(), id);
-	let response = apply_headers(Request::get(url)?).json_owned::<DesuChaptersResponse>()?;
+	let response = apply_api_headers(Request::get(url)?).json_owned::<DesuChaptersResponse>()?;
 
 	if let Some(chapters) = response.chapters {
 		Ok(chapters
@@ -81,7 +87,7 @@ pub fn fetch_chapter_pages(manga_id: &str, chapter_id: &str) -> Result<Vec<Strin
 		manga_id,
 		chapter_id
 	);
-	let response = apply_headers(Request::get(url)?).json_owned::<DesuChapterResponse>()?;
+	let response = apply_api_headers(Request::get(url)?).json_owned::<DesuChapterResponse>()?;
 
 	if let Some(chapter) = response.chapter {
 		Ok(chapter
@@ -206,6 +212,7 @@ fn catalog_url(page: i32, filters: Vec<FilterValue>) -> String {
 			FilterValue::Select { id, value } if id != "section" => {
 				params.push(&id, Some(&value));
 			}
+			FilterValue::MultiSelect { id, .. } if id.starts_with("ranobe_") => {}
 			FilterValue::MultiSelect {
 				id,
 				included,
@@ -284,4 +291,25 @@ pub fn search(query: Option<String>, page: i32, filters: Vec<FilterValue>) -> Re
 		entries,
 		has_next_page: current_page < last_page,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::catalog_url;
+	use aidoku::{FilterValue, alloc::vec};
+	use aidoku_test::aidoku_test;
+
+	#[aidoku_test]
+	fn manga_catalog_ignores_ranobe_only_filters() {
+		let url = catalog_url(
+			1,
+			vec![FilterValue::MultiSelect {
+				id: "ranobe_status".into(),
+				included: vec!["ongoing".into()],
+				excluded: vec![],
+			}],
+		);
+
+		assert!(!url.contains("ranobe_status"));
+	}
 }

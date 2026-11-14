@@ -2,10 +2,11 @@
 	"info": {
 		"id": "zh.mycomic",
 		"name": "MYCOMIC",
-		"version": 2,
+		"version": 3,
 		"url": "https://mycomic.com",
 		"contentRating": 1,
-		"languages": ["zh"]
+		"languages": ["zh"],
+		"minAppVersion": "0.7.1"
 	},
 	"config": {
 		"hidesFiltersWhileSearching": true,

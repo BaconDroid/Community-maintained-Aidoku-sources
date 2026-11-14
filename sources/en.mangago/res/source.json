@@ -2,10 +2,11 @@
 	"info": {
 		"id": "en.mangago",
 		"name": "Mangago",
-		"version": 3,
+		"version": 4,
 		"url": "https://www.mangago.me",
 		"contentRating": 2,
-		"languages": ["en"]
+		"languages": ["en"],
+		"minAppVersion": "0.7.1"
 	},
 	"config": {
 		"supportsAuthorSearch": true,

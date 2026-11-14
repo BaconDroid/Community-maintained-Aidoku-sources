@@ -2,14 +2,19 @@
 	"info": {
 		"id": "zh.wnacg",
 		"name": "紳士漫畫",
-		"version": 3,
+		"version": 6,
 		"urls": [
+			"https://www.wn001.cfd",
+			"https://www.wn002.cfd",
 			"https://www.wnacg.com",
-			"https://www.wnacg05.cc",
+			"https://www.wnacg.site",
+			"https://www.wnacg.buzz",
+			"https://www.wnacg.ru",
 			"https://www.wn07.ru"
 		],
 		"contentRating": 2,
-		"languages": ["zh"]
+		"languages": ["zh"],
+		"minAppVersion": "0.7.1"
 	},
 	"listings": [
 		{
@@ -39,14 +44,13 @@
 		{
 			"id": "magazine",
 			"name": "杂志&短篇"
-		},
-		{
-			"id": "korean",
-			"name": "韩漫"
 		}
 	],
 	"config": {
+		"allowsBaseUrlSelect": true,
 		"hidesFiltersWhileSearching": true,
-		"supportsTagSearch": true
+		"supportsTagSearch": true,
+		"supportsAuthorSearch": true,
+		"supportsArtistSearch": true
 	}
 }

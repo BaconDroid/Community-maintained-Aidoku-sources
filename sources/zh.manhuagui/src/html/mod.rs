@@ -11,11 +11,17 @@ use aidoku::{
 	prelude::*,
 };
 use regex::Regex;
+use spin::Lazy;
+
+// Compile the regex once instead of per chapter to keep the details call
+// fast on interpreted runtimes (see Aidoku-Community/sources#829).
+static CHAPTER_RE: Lazy<Regex> = Lazy::new(|| {
+	#[expect(clippy::unwrap_used)]
+	Regex::new(r"(?:第\s*)(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:话|話|章|回|卷|册|冊)").unwrap()
+});
 
 fn extract_chapter_number(title: &str) -> Option<f32> {
-	let re =
-		Regex::new(r"(?:第\s*)(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:话|話|章|回|卷|册|冊)").ok()?;
-	if let Some(captures) = re.captures(title) {
+	if let Some(captures) = CHAPTER_RE.captures(title) {
 		let num_match = captures.get(1).or_else(|| captures.get(2));
 		if let Some(num_match) = num_match
 			&& let Ok(num) = num_match.as_str().parse::<f32>()
@@ -260,9 +266,7 @@ impl ChapterPage for Document {
 								.attr("href")
 								.ok_or_else(|| error!("Failed to get href"))?;
 							let url = format!("{}{}", crate::settings::get_base_url(), href);
-							let id = href
-								.replace("/comic/", "")
-								.replace(".html", "");
+							let id = href.replace("/comic/", "").replace(".html", "");
 							let chapter_id = match id.split('/').next_back() {
 								Some(id) => String::from(id),
 								None => String::new(),

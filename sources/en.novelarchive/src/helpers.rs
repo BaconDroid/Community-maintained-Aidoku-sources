@@ -1,235 +1,233 @@
+use crate::{
+	API_URL, BASE_URL, PAGE_SIZE,
+	models::{ErrorResponse, Genre, GenreList, MirrorChapterList, MirrorList, NovelList},
+	settings,
+};
 use aidoku::{
-	Chapter, ContentRating, Manga, MangaStatus, Result,
-	alloc::{String, Vec, string::ToString, vec},
-	imports::net::Request,
+	Chapter, ContentRating, MangaPageResult, Result,
+	alloc::{String, Vec, string::ToString},
+	helpers::uri::QueryParameters,
+	imports::net::{Request, Response},
 	prelude::*,
 };
+use core::{fmt::Display, mem::take};
 use serde::de::DeserializeOwned;
 
-use crate::models::Novel;
-use crate::{BASE_URL, USER_AGENT};
+// The genres the site's library excludes when hiding adult novels.
+pub const ADULT_GENRES: [&str; 12] = [
+	"adult",
+	"smut",
+	"mature",
+	"erotica",
+	"ecchi",
+	"hentai",
+	"explicit",
+	"sexual content",
+	"nsfw",
+	"r-18",
+	"lewd",
+	"pornographic",
+];
 
-pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
-	Request::get(url)?
-		.header("User-Agent", USER_AGENT)
-		.header("Accept-Language", "en-US,en;q=0.9")
-		.json_owned::<T>()
+// Values the genre list carries that the site treats as categories, not genres.
+const NON_GENRES: [&str; 7] = [
+	"browse",
+	"completed novel",
+	"completed novels",
+	"latest novels",
+	"latest novel",
+	"anime & comics",
+	"anime and comics",
+];
+
+pub fn request<T: AsRef<str>>(url: T) -> Result<Request> {
+	Ok(Request::get(url)?.header("Accept", "application/json"))
 }
 
-pub fn absolute_url(path_or_url: &str) -> String {
-	if path_or_url.starts_with("http") {
-		path_or_url.into()
-	} else if path_or_url.starts_with('/') {
-		format!("{BASE_URL}{path_or_url}")
-	} else {
-		format!("{BASE_URL}/{path_or_url}")
-	}
+pub fn get<T: DeserializeOwned>(url: &str) -> Result<T> {
+	parse(request(url)?.send()?)
 }
 
-pub fn split_genres(genres: &str) -> Vec<String> {
-	let mut tags: Vec<String> = Vec::new();
-	for genre in genres.split(',') {
-		let genre = genre.trim();
-		if !genre.is_empty() && !tags.iter().any(|tag| tag.eq_ignore_ascii_case(genre)) {
-			tags.push(genre.into());
+// The genres the filters and settings offer, without the site's category values.
+pub fn listed_genres(list: GenreList) -> impl Iterator<Item = Genre> {
+	list.genres
+		.into_iter()
+		.filter(|genre| !NON_GENRES.contains(&genre.value.to_lowercase().as_str()))
+}
+
+pub fn parse<T: DeserializeOwned>(response: Response) -> Result<T> {
+	let status = response.status_code();
+	if !(200..300).contains(&status) {
+		match response.get_json_owned::<ErrorResponse>() {
+			Ok(body) => bail!("Novel Archive: {}", body.error),
+			Err(_) => bail!("Novel Archive returned status {status}"),
 		}
 	}
-	tags
+	response.get_json_owned()
 }
 
-pub fn parse_status(value: &str) -> MangaStatus {
-	match value.trim().to_ascii_lowercase().as_str() {
-		"ongoing" | "releasing" => MangaStatus::Ongoing,
-		"completed" | "complete" => MangaStatus::Completed,
-		"hiatus" => MangaStatus::Hiatus,
-		"cancelled" | "canceled" | "dropped" => MangaStatus::Cancelled,
-		_ => MangaStatus::Unknown,
-	}
+#[derive(Default)]
+pub struct SearchParams {
+	pub query: Option<String>,
+	pub sort: Option<&'static str>,
+	pub status: Option<String>,
+	pub source: Option<String>,
+	pub any_genre: bool,
+	pub genres: Vec<String>,
+	pub hidden_genres: Vec<String>,
+	pub hide_adult: bool,
+	pub default_hidden_genres: Vec<String>,
 }
 
-pub fn content_rating(tags: &[String]) -> ContentRating {
-	if tags.iter().any(|tag| is_nsfw_signal(tag)) {
-		ContentRating::NSFW
-	} else if tags.iter().any(|tag| is_suggestive_signal(tag)) {
-		ContentRating::Suggestive
-	} else {
-		ContentRating::Safe
-	}
-}
-
-fn is_nsfw_signal(value: &str) -> bool {
-	const NSFW_TAGS: &[&str] = &["adult", "erotica", "nsfw", "nudity", "r-18", "r18", "smut"];
-	NSFW_TAGS
-		.iter()
-		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
-}
-
-fn is_suggestive_signal(value: &str) -> bool {
-	const SUGGESTIVE_TAGS: &[&str] = &["bl", "ecchi", "gl", "mature", "yaoi", "yuri"];
-	SUGGESTIVE_TAGS
-		.iter()
-		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
-}
-
-impl From<Novel> for Manga {
-	fn from(novel: Novel) -> Self {
-		let url = Some(format!("{BASE_URL}/novel?id={}", novel.id));
-		let tags = split_genres(novel.genres.as_deref().unwrap_or(""));
-		let status = parse_status(
-			novel
-				.release_status
-				.as_deref()
-				.or(novel.ongoing.as_deref())
-				.unwrap_or(""),
-		);
-		let cover = novel
-			.cover_url
-			.or(novel.image_url)
-			.or(novel.novel_image)
-			.map(|path| absolute_url(&path));
-		let author = novel.author.filter(|author| !author.trim().is_empty());
-		let description = novel
-			.description
-			.filter(|description| !description.trim().is_empty());
-		let rating = content_rating(&tags);
-		Manga {
-			key: novel.id,
-			title: novel.title,
-			cover,
-			authors: author.map(|author| vec![author]),
-			description,
-			url,
-			tags: (!tags.is_empty()).then_some(tags),
-			status,
-			content_rating: rating,
+impl SearchParams {
+	pub fn from_settings() -> Self {
+		Self {
+			hide_adult: settings::hide_adult(),
+			default_hidden_genres: settings::hidden_genres(),
 			..Default::default()
 		}
 	}
-}
 
-pub fn build_chapters(novel_id: &str, names: Vec<String>) -> Vec<Chapter> {
-	names
-		.into_iter()
-		.enumerate()
-		.map(|(index, name)| {
-			let number = index + 1;
-			Chapter {
-				key: number.to_string(),
-				title: Some(name),
-				chapter_number: Some(number as f32),
-				url: Some(format!(
-					"{BASE_URL}/reader?novel={novel_id}&chapter={number}"
-				)),
-				..Default::default()
-			}
-		})
-		.collect()
-}
-
-fn has_paragraph_break(content: &str) -> bool {
-	let mut seen_content = false;
-	let mut seen_blank = false;
-	for line in content.lines() {
-		if line.trim().is_empty() {
-			seen_blank |= seen_content;
-		} else if seen_blank {
-			return true;
-		} else {
-			seen_content = true;
+	pub fn url(mut self, page: i32) -> String {
+		// A genre the search itself includes or excludes wins over the setting.
+		let default_hidden: Vec<String> = take(&mut self.default_hidden_genres)
+			.into_iter()
+			.filter(|genre| !self.genres.contains(genre) && !self.hidden_genres.contains(genre))
+			.collect();
+		self.hidden_genres.extend(default_hidden);
+		if self.hide_adult {
+			self.hidden_genres
+				.extend(ADULT_GENRES.iter().map(|genre| genre.to_string()));
 		}
+		let mut qs = QueryParameters::new();
+		qs.push("page", Some(&page.to_string()));
+		qs.push("per_page", Some(&PAGE_SIZE.to_string()));
+		if let Some(query) = &self.query {
+			qs.push("search", Some(query));
+			qs.push("fuzzy", Some("1"));
+		}
+		if let Some(sort) = self.sort {
+			qs.push("sort", Some(sort));
+		}
+		if let Some(status) = &self.status {
+			qs.push("status", Some(status));
+		}
+		if let Some(source) = &self.source {
+			qs.push("source", Some(source));
+		}
+		if !self.genres.is_empty() {
+			qs.push("genres_include", Some(&self.genres.join(",")));
+		}
+		if !self.hidden_genres.is_empty() {
+			qs.push("genres_exclude", Some(&self.hidden_genres.join(",")));
+		}
+		if self.any_genre {
+			qs.push("genre_match", Some("any"));
+		}
+		format!("{API_URL}?{qs}")
 	}
-	false
 }
 
-pub fn chapter_text(content: &str) -> String {
-	let has_markup = content.contains("</")
-		|| ["<br", "<img", "<hr"]
-			.iter()
-			.any(|tag| content.contains(tag));
-	if has_markup || has_paragraph_break(content) {
-		return content.into();
-	}
-	let mut output = String::default();
-	for line in content.lines() {
-		if line.trim().is_empty() {
-			continue;
-		}
-		if !output.is_empty() {
-			output.push_str("\n\n");
-		}
-		output.push_str(line);
-	}
-	output
-}
-
-pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
-	query.split('&').find_map(|pair| {
-		let (name, value) = pair.split_once('=')?;
-		(name == key).then_some(value)
+pub fn browse(params: SearchParams, page: i32) -> Result<MangaPageResult> {
+	let list: NovelList = get(&params.url(page))?;
+	Ok(MangaPageResult {
+		has_next_page: list
+			.pagination
+			.is_some_and(|pagination| pagination.has_next),
+		entries: list.novels.into_iter().map(Into::into).collect(),
 	})
 }
 
-#[cfg(test)]
-mod tests {
-	use aidoku::alloc::string::ToString;
-	use aidoku_test::aidoku_test;
+pub fn chapter_url(id: &str, number: impl Display) -> String {
+	format!("{BASE_URL}/reader?novel={id}&chapter={number}")
+}
 
-	use super::*;
-
-	#[aidoku_test]
-	fn splits_comma_separated_genres() {
-		assert_eq!(
-			split_genres("Action, Fantasy, Mystery"),
-			vec![
-				"Action".to_string(),
-				"Fantasy".to_string(),
-				"Mystery".to_string()
-			]
-		);
-		assert_eq!(split_genres(""), Vec::<String>::new());
-		assert_eq!(split_genres("Action, , Action"), vec!["Action".to_string()]);
+pub fn genres(list: &str) -> Vec<String> {
+	let mut genres: Vec<String> = Vec::new();
+	for genre in list.split(',').map(str::trim) {
+		let lowered = genre.to_lowercase();
+		if genre.is_empty()
+			|| NON_GENRES.contains(&lowered.as_str())
+			|| genres.iter().any(|seen| seen.to_lowercase() == lowered)
+		{
+			continue;
+		}
+		genres.push(genre.into());
 	}
+	genres
+}
 
-	#[aidoku_test]
-	fn parses_status_values() {
-		assert!(matches!(parse_status("ongoing"), MangaStatus::Ongoing));
-		assert!(matches!(parse_status("Completed"), MangaStatus::Completed));
-		assert!(matches!(parse_status("hiatus"), MangaStatus::Hiatus));
-		assert!(matches!(parse_status("dropped"), MangaStatus::Cancelled));
-		assert!(matches!(parse_status("unknown"), MangaStatus::Unknown));
+pub fn content_rating(list: &str) -> ContentRating {
+	let mut rating = ContentRating::Safe;
+	for genre in list.split(',').map(|genre| genre.trim().to_lowercase()) {
+		match genre.as_str() {
+			"mature" | "ecchi" => rating = ContentRating::Suggestive,
+			genre if ADULT_GENRES.contains(&genre) => return ContentRating::NSFW,
+			_ => {}
+		}
 	}
+	rating
+}
 
-	#[aidoku_test]
-	fn extracts_query_parameters() {
-		assert_eq!(query_param("novel=abc&chapter=12", "chapter"), Some("12"));
-		assert_eq!(query_param("novel=abc", "chapter"), None);
+// "Chapter 2315 Nothing Is Certain" gives 2315 and "Nothing Is Certain"; a name without a leading
+// number keeps the fallback, and a title that is only a part number ("2") is none.
+pub fn number_and_title(name: &str, fallback: f32) -> (f32, Option<String>) {
+	let name = name.trim();
+	let (number, title) = leading_chapter_number(name).unwrap_or((fallback, name));
+	let title = (!title.chars().all(|c| c.is_ascii_digit())).then(|| title.into());
+	(number, title)
+}
+
+fn leading_chapter_number(name: &str) -> Option<(f32, &str)> {
+	let (start, rest) = name.split_at_checked("chapter ".len())?;
+	if !start.eq_ignore_ascii_case("chapter ") {
+		return None;
 	}
+	let (digits, title) = rest.split_at(
+		rest.find(|c: char| !c.is_ascii_digit() && c != '.')
+			.unwrap_or(rest.len()),
+	);
+	let number = digits.trim_end_matches('.').parse().ok()?;
+	let separators = [' ', ':', '-', '\u{2013}', '\u{2014}', '.'];
+	let title = title.trim_start_matches(separators);
+	// Some names repeat the number: "Chapter 2 - 2: The Joy of Being".
+	let title = title
+		.strip_prefix(digits)
+		.filter(|rest| rest.starts_with(separators))
+		.map_or(title, |rest| rest.trim_start_matches(separators));
+	Some((number, title.trim_end()))
+}
 
-	#[aidoku_test]
-	fn splits_line_per_paragraph_chapters() {
-		let content =
-			"Slave of Witch City (1) \nAmidst the cold autumn rainfall.\nNo matter how much time.";
-		assert_eq!(
-			chapter_text(content),
-			"Slave of Witch City (1) \n\nAmidst the cold autumn rainfall.\n\nNo matter how much time."
-		);
-	}
-
-	#[aidoku_test]
-	fn keeps_chapters_that_already_have_paragraph_breaks() {
-		let content = "First line\nsecond line\n\nNext paragraph";
-		assert_eq!(chapter_text(content), content);
-
-		let crlf = "First\r\nsecond\r\n\r\nNext";
-		assert_eq!(chapter_text(crlf), crlf);
-
-		let padded = "First\n \nNext";
-		assert_eq!(chapter_text(padded), padded);
-	}
-
-	#[aidoku_test]
-	fn leaves_markup_chapters_untouched() {
-		let content = "<p>One</p><p>Two</p>";
-		assert_eq!(chapter_text(content), content);
-	}
+// Mirrors are extra: when their list is slow or fails, the site's own chapters still load.
+pub fn mirror_chapters(id: &str) -> Vec<Chapter> {
+	let chapters = || -> Result<Vec<Chapter>> {
+		// The list can hang for half a minute before a 504.
+		let list: MirrorList = parse(
+			request(format!("{API_URL}/{id}/sources"))?
+				.timeout(8.0)
+				.send()?,
+		)?;
+		let mut requests = Vec::new();
+		for mirror in &list.sources {
+			requests.push(request(format!(
+				"{API_URL}/{id}/sources/{}/chapters",
+				mirror.id
+			))?);
+		}
+		Ok(list
+			.sources
+			.iter()
+			.zip(Request::send_all(requests))
+			.filter_map(|(mirror, response)| {
+				Some((mirror, parse::<MirrorChapterList>(response.ok()?).ok()?))
+			})
+			.flat_map(|(mirror, chapters)| {
+				chapters
+					.chapters
+					.into_iter()
+					.map(|chapter| chapter.into_chapter(id, mirror))
+			})
+			.collect())
+	};
+	chapters().unwrap_or_default()
 }

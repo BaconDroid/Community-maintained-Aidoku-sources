@@ -1,29 +1,29 @@
 #![no_std]
 use aidoku::{
-	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, PageContent, Result, Source,
-	alloc::{String, Vec, string::ToString, vec},
-	helpers::uri::QueryParameters,
-	imports::std::send_partial_result,
+	Chapter, DeepLinkHandler, DeepLinkResult, DynamicFilters, DynamicSettings, Filter, FilterValue,
+	GroupSetting, Home, HomeComponent, HomeComponentValue, HomeLayout, HomePartialResult, Listing,
+	ListingProvider, Manga, MangaPageResult, MultiSelectFilter, MultiSelectSetting, Page,
+	PageContent, Result, SelectFilter, Setting, Source,
+	alloc::{String, Vec, vec},
+	helpers::string::PlainText,
+	imports::{net::Request, std::send_partial_result},
 	prelude::*,
 };
 
 mod helpers;
 mod markdown;
 mod models;
-mod mtl;
 mod settings;
-mod watermark;
 
-use helpers::{build_chapters, chapter_text, query_param, request};
-use models::{ChapterDetailData, ListData, ListingData, NovelDetailData};
+use helpers::{SearchParams, browse, get, listed_genres, mirror_chapters, parse, request};
+use markdown::{html_to_markdown, paragraphs};
+use models::{ChapterResponse, MirrorChapterText, MirrorList, Novel, NovelDetails, NovelList};
 
-pub const BASE_URL: &str = "https://novelarchive.st";
-pub const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 \
-	 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
-
-const SORT_IDS: &[&str] = &["recent", "popular", "chapters", "rating"];
-const PAGE_SIZE: &str = "24";
+const BASE_URL: &str = "https://novelarchive.st";
+const API_URL: &str = "https://novelarchive.st/api/novels";
+const PAGE_SIZE: i32 = 24;
+// The fixed feeds return at most 50, whatever the limit.
+const FEED_SIZE: i32 = 50;
 
 struct NovelArchive;
 
@@ -38,46 +38,60 @@ impl Source for NovelArchive {
 		page: i32,
 		filters: Vec<FilterValue>,
 	) -> Result<MangaPageResult> {
-		let mut qs = QueryParameters::new();
-		let mut sort = "recent";
-		let mut status: Option<String> = None;
-
+		// A pasted novel or reader link answers with that novel's card; anything else is searched.
+		if let Some(url) = query
+			.as_deref()
+			.map(str::trim)
+			.filter(|q| q.starts_with(BASE_URL))
+			&& let Ok(Some(
+				DeepLinkResult::Manga { key } | DeepLinkResult::Chapter { manga_key: key, .. },
+			)) = self.handle_deep_link(url.into())
+			&& let Ok(details) = get::<NovelDetails>(&format!("{API_URL}/{key}"))
+		{
+			return Ok(MangaPageResult {
+				entries: vec![details.novel.into()],
+				has_next_page: false,
+			});
+		}
+		let mut params = SearchParams {
+			query,
+			..SearchParams::from_settings()
+		};
 		for filter in filters {
 			match filter {
+				// Recently updated is the site's default and isn't sent.
 				FilterValue::Sort { index, .. } => {
-					if let Some(value) = SORT_IDS.get(index as usize) {
-						sort = value;
+					params.sort = match index {
+						1 => Some("popular"),
+						2 => Some("rating"),
+						3 => Some("chapters"),
+						_ => None,
 					}
 				}
-				FilterValue::Select { id, value } if id == "status" => status = Some(value),
+				FilterValue::Select { id, value } => match id.as_str() {
+					"status" => params.status = (value != "all").then_some(value),
+					"source" => params.source = (value != "all").then_some(value),
+					"genre_match" => params.any_genre = value == "any",
+					// A tapped tag carries the genre's label.
+					"genre" => params.genres = vec![value.to_lowercase()],
+					_ => {}
+				},
+				FilterValue::MultiSelect {
+					id,
+					included,
+					excluded,
+				} if id == "genre" => {
+					params.genres = included;
+					params.hidden_genres = excluded;
+				}
+				// Ticked (1) hides adult novels, excluded (2) shows them, overriding the setting.
+				FilterValue::Check { id, value } if id == "hide_adult" => {
+					params.hide_adult = value == 1
+				}
 				_ => {}
 			}
 		}
-
-		let status = status
-			.filter(|value| value != "all")
-			.unwrap_or_else(settings::status);
-
-		qs.push("sort", Some(sort));
-		qs.push("status", Some(&status));
-		qs.push("limit", Some(PAGE_SIZE));
-
-		if let Some(query) = query.as_deref() {
-			qs.push("search", Some(query));
-		}
-
-		let hide = settings::hide_mtl() && !query.as_deref().is_some_and(mtl::mentions_mtl);
-		qs.set("page", Some(&page.max(1).to_string()));
-		let url = format!("{BASE_URL}/api/novels?{qs}");
-		let data: ListData = request(&url)?;
-		let mut entries: Vec<Manga> = data.novels.into_iter().map(Manga::from).collect();
-		if hide {
-			mtl::retain_manga(&mut entries);
-		}
-		Ok(MangaPageResult {
-			entries,
-			has_next_page: data.pagination.has_next,
-		})
+		browse(params, page)
 	}
 
 	fn get_manga_update(
@@ -86,51 +100,56 @@ impl Source for NovelArchive {
 		needs_details: bool,
 		needs_chapters: bool,
 	) -> Result<Manga> {
-		if needs_details {
-			let url = format!("{BASE_URL}/api/novels/{}", manga.key);
-			let data: NovelDetailData = request(&url)?;
-			let mut novel = data.novel;
-			let chapters = if needs_chapters {
-				let mut chapters =
-					build_chapters(&novel.id, core::mem::take(&mut novel.chapter_names));
-				if settings::hide_mtl() {
-					mtl::retain_chapters(&mut chapters);
+		let novel = get::<NovelDetails>(&format!("{API_URL}/{}", manga.key))?.novel;
+		if needs_chapters {
+			let mut chapters = novel.chapters();
+			let mirrors = mirror_chapters(&manga.key);
+			if !mirrors.is_empty() {
+				for chapter in &mut chapters {
+					chapter.scanlators = Some(vec!["Novel Archive".into()]);
 				}
-				Some(chapters)
-			} else {
-				None
-			};
-			manga.copy_from(novel.into());
-			if needs_chapters {
-				send_partial_result(&manga);
-				manga.chapters = chapters;
-			}
-		} else if needs_chapters {
-			let url = format!("{BASE_URL}/api/novels/{}", manga.key);
-			let data: NovelDetailData = request(&url)?;
-			let mut chapters = build_chapters(&data.novel.id, data.novel.chapter_names);
-			if settings::hide_mtl() {
-				mtl::retain_chapters(&mut chapters);
+				chapters.extend(mirrors);
+				// Stable, so the site's own copy stays above a mirror's of the same number.
+				chapters.sort_by(|a, b| {
+					let number = |chapter: &Chapter| chapter.chapter_number.unwrap_or_default();
+					number(b).total_cmp(&number(a))
+				});
 			}
 			manga.chapters = Some(chapters);
+		}
+		if needs_details {
+			let mut details = novel.into_details();
+			// The details page renders Markdown; the big scroller shows the text as it is.
+			details.description = details.description.map(|text| text.escape_markdown());
+			manga.copy_from(details);
 		}
 		Ok(manga)
 	}
 
 	fn get_page_list(&self, manga: Manga, chapter: Chapter) -> Result<Vec<Page>> {
-		let url = format!(
-			"{BASE_URL}/api/novels/{}/chapters/{}",
-			manga.key, chapter.key
-		);
-		let data: ChapterDetailData = request(&url)?;
-		let text = markdown::to_markdown(&chapter_text(
-			data.chapter.content.as_deref().unwrap_or_default(),
-		));
-		let text = if text.is_empty() {
-			"(empty chapter)".to_string()
-		} else {
-			text
+		let text = match chapter.key.split_once(':') {
+			Some((mirror, number)) => html_to_markdown(
+				&get::<MirrorChapterText>(&format!(
+					"{API_URL}/{}/sources/{mirror}/chapters/{number}",
+					manga.key
+				))?
+				.content_html
+				.unwrap_or_default(),
+			)?,
+			// The archive's own copies are plain text, which the site prints as is.
+			None => paragraphs(
+				&get::<ChapterResponse>(&format!(
+					"{API_URL}/{}/chapters/{}?prefetch=1",
+					manga.key, chapter.key
+				))?
+				.chapter
+				.content
+				.unwrap_or_default(),
+			),
 		};
+		if text.is_empty() {
+			bail!("This chapter has no text on Novel Archive yet");
+		}
 		Ok(vec![Page {
 			content: PageContent::text(text),
 			..Default::default()
@@ -138,199 +157,232 @@ impl Source for NovelArchive {
 	}
 }
 
-impl ListingProvider for NovelArchive {
-	fn get_manga_list(&self, listing: Listing, _page: i32) -> Result<MangaPageResult> {
-		let path = match listing.id.as_str() {
-			"trending" => "trending",
-			"recent" => "recent",
-			"recently-updated" => "recently-updated",
-			_ => bail!("Unknown listing: {}", listing.id),
+impl Home for NovelArchive {
+	fn get_home(&self) -> Result<HomeLayout> {
+		let mut layout = HomeLayout {
+			components: [
+				("Trending", HomeComponentValue::empty_big_scroller()),
+				("Popular", HomeComponentValue::empty_scroller()),
+				(
+					"Recently Updated",
+					HomeComponentValue::empty_manga_chapter_list(),
+				),
+				("Top Rated", HomeComponentValue::empty_scroller()),
+				("Editor's Choice", HomeComponentValue::empty_big_scroller()),
+				("Recently Added", HomeComponentValue::empty_scroller()),
+			]
+			.into_iter()
+			.map(|(title, value)| HomeComponent {
+				title: Some(title.into()),
+				subtitle: None,
+				value,
+			})
+			.collect(),
 		};
-		let url = format!("{BASE_URL}/api/novels/{path}");
-		let data: ListingData = request(&url)?;
-		let mut entries: Vec<Manga> = data.novels.into_iter().map(Manga::from).collect();
-		if settings::hide_mtl() {
-			mtl::retain_manga(&mut entries);
+		send_partial_result(&HomePartialResult::Layout(layout.clone()));
+
+		let sorted = |sort| {
+			request(
+				SearchParams {
+					sort,
+					..SearchParams::from_settings()
+				}
+				.url(1),
+			)
+		};
+		let mut feeds: Vec<Result<Vec<Novel>>> = Request::send_all([
+			request(format!("{API_URL}/trending?limit={FEED_SIZE}"))?,
+			sorted(Some("popular"))?,
+			request(format!("{API_URL}/recently-updated?limit={FEED_SIZE}"))?,
+			sorted(Some("rating"))?,
+			request(format!("{API_URL}/editors-choice?limit={FEED_SIZE}"))?,
+			sorted(None)?,
+		])
+		.into_iter()
+		.map(|response| Ok(parse::<NovelList>(response?)?.novels))
+		.collect();
+		if feeds.iter().all(Result::is_err)
+			&& let Err(error) = feeds.swap_remove(0)
+		{
+			return Err(error);
 		}
-		Ok(MangaPageResult {
-			entries,
-			has_next_page: false,
-		})
+		let mut feeds = feeds
+			.into_iter()
+			.map(|feed| feed.ok().filter(|novels| !novels.is_empty()));
+		let mut feed = || feeds.next().flatten();
+
+		let big = |novels: Vec<Novel>, auto_scroll_interval| HomeComponentValue::BigScroller {
+			entries: novels.into_iter().map(Novel::into_details).collect(),
+			auto_scroll_interval,
+		};
+		let scroller = |novels: Vec<Novel>, id: &str, name: &str| HomeComponentValue::Scroller {
+			entries: novels
+				.into_iter()
+				.map(|novel| Manga::from(novel).into())
+				.collect(),
+			listing: Some(Listing {
+				id: id.into(),
+				name: name.into(),
+				..Default::default()
+			}),
+		};
+		// Array elements are evaluated in order, so each takes its own feed.
+		let values = [
+			feed().map(|novels| big(novels, Some(8.0))),
+			feed().map(|novels| scroller(novels, "popular", "Popular")),
+			feed().map(|novels| HomeComponentValue::MangaChapterList {
+				page_size: Some(5),
+				entries: novels.into_iter().filter_map(Novel::into_latest).collect(),
+				listing: None,
+			}),
+			feed().map(|novels| scroller(novels, "rating", "Top Rated")),
+			// The feed carries each pick's description and genres.
+			feed().map(|novels| big(novels, None)),
+			feed().map(|novels| scroller(novels, "recent", "Recently Added")),
+		];
+		layout.components = layout
+			.components
+			.into_iter()
+			.zip(values)
+			.filter_map(|(component, value)| {
+				Some(HomeComponent {
+					value: value?,
+					..component
+				})
+			})
+			.collect();
+		Ok(layout)
+	}
+}
+
+impl ListingProvider for NovelArchive {
+	fn get_manga_list(&self, listing: Listing, page: i32) -> Result<MangaPageResult> {
+		let sort = match listing.id.as_str() {
+			"popular" => Some("popular"),
+			"rating" => Some("rating"),
+			"recent" => None,
+			_ => bail!("Unknown listing"),
+		};
+		browse(
+			SearchParams {
+				sort,
+				..SearchParams::from_settings()
+			},
+			page,
+		)
+	}
+}
+
+impl DynamicFilters for NovelArchive {
+	fn get_dynamic_filters(&self) -> Result<Vec<Filter>> {
+		let mut responses = Request::send_all([
+			request(format!("{API_URL}/genres"))?,
+			request(format!("{API_URL}/source-list"))?,
+		])
+		.into_iter();
+		let (Some(genres), Some(sources)) = (responses.next(), responses.next()) else {
+			bail!("Novel Archive's filters didn't load");
+		};
+		let (options, ids) = listed_genres(parse(genres?)?)
+			.map(|genre| (genre.label.into(), genre.value.into()))
+			.unzip();
+		let (mut source_options, mut source_ids): (Vec<_>, Vec<_>) = parse::<MirrorList>(sources?)?
+			.sources
+			.into_iter()
+			.map(|source| (source.name().into(), source.id.into()))
+			.unzip();
+		source_options.insert(0, "All".into());
+		source_ids.insert(0, "all".into());
+		Ok(vec![
+			// Where the archive's copy of a novel came from, as the site's library filters it.
+			SelectFilter {
+				id: "source".into(),
+				title: Some("Source".into()),
+				options: source_options,
+				ids: Some(source_ids),
+				..Default::default()
+			}
+			.into(),
+			MultiSelectFilter {
+				id: "genre".into(),
+				title: Some("Genres".into()),
+				is_genre: true,
+				can_exclude: true,
+				uses_tag_style: true,
+				options,
+				ids: Some(ids),
+				..Default::default()
+			}
+			.into(),
+		])
+	}
+}
+
+impl DynamicSettings for NovelArchive {
+	fn get_dynamic_settings(&self) -> Result<Vec<Setting>> {
+		let (values, titles): (Vec<_>, Vec<_>) = listed_genres(get(&format!("{API_URL}/genres"))?)
+			.map(|genre| (genre.value.into(), genre.label.into()))
+			.unzip();
+		Ok(vec![
+			GroupSetting {
+				title: "Genres".into(),
+				footer: Some(
+					"Applies to search, listings and the sorted Discover rows. A genre a search \
+					 includes itself overrides it."
+						.into(),
+				),
+				items: vec![
+					MultiSelectSetting {
+						key: "hiddenGenres".into(),
+						title: "Hidden Genres".into(),
+						values,
+						titles: Some(titles),
+						refreshes: Some(vec!["content".into(), "listings".into()]),
+						..Default::default()
+					}
+					.into(),
+				],
+				..Default::default()
+			}
+			.into(),
+		])
 	}
 }
 
 impl DeepLinkHandler for NovelArchive {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
-		let Some((base, query)) = url.split_once('?') else {
+		let Some(rest) = url.strip_prefix(BASE_URL) else {
 			return Ok(None);
 		};
-		let path = [
-			"https://novelarchive.st/",
-			"http://novelarchive.st/",
-			"https://www.novelarchive.st/",
-			"http://www.novelarchive.st/",
-		]
-		.iter()
-		.find_map(|prefix| base.strip_prefix(prefix))
-		.map(|path| path.trim_end_matches('/'))
-		.unwrap_or_default();
-		let query = query.split('#').next().unwrap_or_default();
-
-		match path {
-			"novel" => {
-				let Some(id) = query_param(query, "id") else {
-					return Ok(None);
-				};
-				if id.is_empty() {
-					return Ok(None);
-				}
-				Ok(Some(DeepLinkResult::Manga { key: id.into() }))
-			}
-			"reader" => {
-				let (Some(id), Some(chapter)) =
-					(query_param(query, "novel"), query_param(query, "chapter"))
-				else {
-					return Ok(None);
-				};
-				if id.is_empty() || chapter.is_empty() {
-					return Ok(None);
-				}
-				Ok(Some(DeepLinkResult::Chapter {
-					manga_key: id.into(),
-					key: chapter.into(),
-				}))
-			}
-			_ => Ok(None),
-		}
+		let rest = rest.split('#').next().unwrap_or_default();
+		let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+		let param = |name: &str| {
+			query
+				.split('&')
+				.find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+				.filter(|value| !value.is_empty())
+		};
+		Ok(match path {
+			"/novel" => param("id").map(|id| DeepLinkResult::Manga { key: id.into() }),
+			"/reader" => param("novel")
+				.zip(param("chapter"))
+				.map(|(novel, chapter)| DeepLinkResult::Chapter {
+					manga_key: novel.into(),
+					key: match param("source") {
+						Some(mirror) => format!("{mirror}:{chapter}"),
+						None => chapter.into(),
+					},
+				}),
+			_ => None,
+		})
 	}
 }
 
-register_source!(NovelArchive, ListingProvider, DeepLinkHandler);
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use aidoku_test::aidoku_test;
-
-	const SHADOW_SLAVE_KEY: &str = "69faa859a5f4c7d1b734d496";
-
-	#[aidoku_test]
-	fn search_returns_results() {
-		let source = NovelArchive;
-		let result = source
-			.get_search_manga_list(Some("shadow slave".into()), 1, Vec::new())
-			.expect("search failed");
-		assert!(!result.entries.is_empty(), "expected at least one result");
-		assert!(
-			result
-				.entries
-				.iter()
-				.any(|manga| manga.title.to_lowercase().contains("shadow slave")),
-			"expected 'Shadow Slave' in results"
-		);
-	}
-
-	#[aidoku_test]
-	fn series_detail_has_all_chapters() {
-		let source = NovelArchive;
-		let manga = Manga {
-			key: SHADOW_SLAVE_KEY.into(),
-			..Default::default()
-		};
-		let manga = source
-			.get_manga_update(manga, true, true)
-			.expect("get_manga_update failed");
-		assert_eq!(manga.title, "Shadow Slave");
-		assert!(manga.description.is_some());
-		assert!(manga.authors.is_some());
-		assert!(matches!(manga.status, aidoku::MangaStatus::Ongoing));
-		let chapters = manga.chapters.expect("no chapters returned");
-		assert!(
-			chapters.len() > 3000,
-			"expected the full TOC, got {}",
-			chapters.len()
-		);
-		let last_key = chapters.len().to_string();
-		assert_eq!(chapters.first().map(|c| c.key.as_str()), Some("1"));
-		assert_eq!(
-			chapters.last().map(|c| c.key.as_str()),
-			Some(last_key.as_str())
-		);
-	}
-
-	#[aidoku_test]
-	fn page_list_returns_text_page() {
-		let source = NovelArchive;
-		let manga = Manga {
-			key: SHADOW_SLAVE_KEY.into(),
-			..Default::default()
-		};
-		let chapter = Chapter {
-			key: "1".into(),
-			..Default::default()
-		};
-		let pages = source
-			.get_page_list(manga, chapter)
-			.expect("get_page_list failed");
-		assert_eq!(pages.len(), 1);
-		match &pages[0].content {
-			PageContent::Text(text) => {
-				assert_ne!(text, "(empty chapter)", "chapter body was empty");
-				assert!(text.len() > 500, "expected a full chapter body");
-				assert!(
-					text.contains("\n\n***\n\n"),
-					"scene break should stay markdown, not be escaped"
-				);
-				assert!(
-					!text.contains("\\*"),
-					"emphasis markers should not be escaped"
-				);
-			}
-			_ => panic!("expected PageContent::Text"),
-		}
-	}
-
-	#[aidoku_test]
-	fn deep_link_ignores_foreign_hosts() {
-		let source = NovelArchive;
-		let result = source
-			.handle_deep_link(format!(
-				"https://notnovelarchive.st/novel?id={SHADOW_SLAVE_KEY}"
-			))
-			.expect("deep link failed");
-		assert!(result.is_none(), "expected no deep link for a foreign host");
-	}
-
-	#[aidoku_test]
-	fn deep_link_resolves_series() {
-		let source = NovelArchive;
-		let result = source
-			.handle_deep_link(format!(
-				"https://novelarchive.st/novel?id={SHADOW_SLAVE_KEY}"
-			))
-			.expect("deep link failed")
-			.expect("expected Some(DeepLinkResult)");
-		match result {
-			DeepLinkResult::Manga { key } => assert_eq!(key, SHADOW_SLAVE_KEY),
-			_ => panic!("expected Manga deep link"),
-		}
-	}
-
-	#[aidoku_test]
-	fn deep_link_resolves_chapter() {
-		let source = NovelArchive;
-		let result = source
-			.handle_deep_link(format!(
-				"https://novelarchive.st/reader?novel={SHADOW_SLAVE_KEY}&chapter=1"
-			))
-			.expect("deep link failed")
-			.expect("expected Some(DeepLinkResult)");
-		match result {
-			DeepLinkResult::Chapter { manga_key, key } => {
-				assert_eq!(manga_key, SHADOW_SLAVE_KEY);
-				assert_eq!(key, "1");
-			}
-			_ => panic!("expected Chapter deep link"),
-		}
-	}
-}
+register_source!(
+	NovelArchive,
+	Home,
+	ListingProvider,
+	DynamicFilters,
+	DynamicSettings,
+	DeepLinkHandler
+);
