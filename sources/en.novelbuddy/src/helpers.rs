@@ -276,18 +276,16 @@ pub fn resolve_multi_select(
 	all_options: &[&'static str],
 	included: Vec<String>,
 	excluded: Vec<String>,
-) -> Option<Vec<String>> {
+) -> Vec<String> {
 	let lower_excluded: Vec<String> = excluded.iter().map(|e| e.to_lowercase()).collect();
 	let base: Vec<String> = if included.is_empty() {
 		all_options.iter().map(|s| (*s).into()).collect()
 	} else {
 		included
 	};
-	let filtered: Vec<String> = base
-		.into_iter()
+	base.into_iter()
 		.filter(|s| !lower_excluded.contains(&s.to_lowercase()))
-		.collect();
-	Some(filtered)
+		.collect()
 }
 
 pub fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
@@ -310,7 +308,7 @@ pub fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 				included,
 				excluded,
 			} if id == "status" => {
-				status_filter = resolve_multi_select(STATUS_IDS, included, excluded);
+				status_filter = Some(resolve_multi_select(STATUS_IDS, included, excluded));
 			}
 			FilterValue::MultiSelect {
 				id,
@@ -318,7 +316,7 @@ pub fn parse_filters(filters: Vec<FilterValue>) -> SearchContext {
 				excluded,
 			} if id == "contentRating" => {
 				content_rating_filter =
-					resolve_multi_select(CONTENT_RATING_IDS, included, excluded);
+					Some(resolve_multi_select(CONTENT_RATING_IDS, included, excluded));
 			}
 			FilterValue::MultiSelect {
 				id,
@@ -624,22 +622,11 @@ mod tests {
 		);
 	}
 
-	fn rating_matches_safe() {
+	#[aidoku_test]
+	fn rating_matches_the_matching_tier_only() {
 		assert!(rating_matches("safe", ContentRating::Safe));
-	}
-
-	#[aidoku_test]
-	fn rating_matches_suggestive() {
 		assert!(rating_matches("suggestive", ContentRating::Suggestive));
-	}
-
-	#[aidoku_test]
-	fn rating_matches_nsfw() {
 		assert!(rating_matches("nsfw", ContentRating::NSFW));
-	}
-
-	#[aidoku_test]
-	fn rating_matches_mismatched() {
 		assert!(!rating_matches("safe", ContentRating::Suggestive));
 		assert!(!rating_matches("nsfw", ContentRating::Safe));
 		assert!(!rating_matches("suggestive", ContentRating::NSFW));
@@ -705,62 +692,36 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn resolve_multi_select_empty_included_takes_all_options() {
-		let selected =
-			resolve_multi_select(&["safe", "suggestive", "nsfw"], Vec::new(), Vec::new()).unwrap();
-		assert_eq!(selected, vec!["safe", "suggestive", "nsfw"]);
+	fn resolve_multi_select_resolves_inclusions_and_exclusions() {
+		const ALL: &[&str] = &["safe", "suggestive", "nsfw"];
+		assert_eq!(
+			resolve_multi_select(ALL, Vec::new(), Vec::new()),
+			vec!["safe", "suggestive", "nsfw"]
+		);
+		assert_eq!(
+			resolve_multi_select(ALL, vec!["nsfw".into()], Vec::new()),
+			vec!["nsfw"]
+		);
+		assert_eq!(
+			resolve_multi_select(ALL, vec!["safe".into(), "nsfw".into()], vec!["NSFW".into()]),
+			vec!["safe"]
+		);
+		assert_eq!(
+			resolve_multi_select(ALL, Vec::new(), ALL.iter().map(|s| (*s).into()).collect()),
+			Vec::<String>::new()
+		);
 	}
 
 	#[aidoku_test]
-	fn resolve_multi_select_keeps_included_without_exclusions() {
-		let selected = resolve_multi_select(
-			&["safe", "suggestive", "nsfw"],
-			vec!["nsfw".into()],
-			Vec::new(),
-		)
-		.unwrap();
-		assert_eq!(selected, vec!["nsfw"]);
-	}
-
-	#[aidoku_test]
-	fn resolve_multi_select_applies_exclusions_to_included() {
-		let selected = resolve_multi_select(
-			&["safe", "suggestive", "nsfw"],
-			vec!["safe".into(), "nsfw".into()],
-			vec!["NSFW".into()],
-		)
-		.unwrap();
-		assert_eq!(selected, vec!["safe"]);
-	}
-
-	#[aidoku_test]
-	fn resolve_multi_select_excluding_every_option_yields_empty_selection() {
-		let excluded: Vec<String> = ["safe", "suggestive", "nsfw"]
-			.iter()
-			.map(|s| (*s).into())
-			.collect();
-		let selected = resolve_multi_select(&["safe", "suggestive", "nsfw"], Vec::new(), excluded);
-		assert_eq!(selected, Some(Vec::new()));
-	}
-
-	#[aidoku_test]
-	fn merge_with_persistent_falls_back_when_no_runtime_selection() {
+	fn merge_with_persistent_prefers_the_runtime_selection() {
 		assert_eq!(
 			merge_with_persistent(None, vec!["safe".into()]),
 			vec!["safe"]
 		);
-	}
-
-	#[aidoku_test]
-	fn merge_with_persistent_runtime_overrides_persistent() {
 		assert_eq!(
 			merge_with_persistent(Some(vec!["nsfw".into()]), vec!["safe".into()]),
 			vec!["nsfw"]
 		);
-	}
-
-	#[aidoku_test]
-	fn merge_with_persistent_keeps_explicit_empty_selection() {
 		assert_eq!(
 			merge_with_persistent(Some(Vec::new()), vec!["safe".into()]),
 			Vec::<String>::new()
