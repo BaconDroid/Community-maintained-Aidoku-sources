@@ -15,6 +15,9 @@ use crate::{API_URL, BASE_URL, USER_AGENT};
 // parses `/titles/shadow-slave` as the id `shadow`.
 const CANONICAL_ID_LEN: usize = 8;
 
+const ALLOWED_HOSTS: &[&str] = &["novelbuddy.me", "www.novelbuddy.me"];
+const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
+
 pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 	let response = Request::get(url)?
 		.header("User-Agent", USER_AGENT)
@@ -160,6 +163,29 @@ pub fn absolute_url(path_or_url: &str) -> String {
 	} else {
 		format!("{BASE_URL}/{path_or_url}")
 	}
+}
+
+pub fn series_path(url: &str) -> Option<&str> {
+	let without_fragment = url.split(['?', '#']).next()?;
+	let (scheme, authority_and_path) = without_fragment.split_once("://")?;
+	if !ALLOWED_SCHEMES.contains(&scheme.to_ascii_lowercase().as_str()) {
+		return None;
+	}
+	let (authority, path) = authority_and_path
+		.split_once('/')
+		.unwrap_or((authority_and_path, ""));
+	if authority.contains('\\') {
+		return None;
+	}
+	let host = authority
+		.rsplit('@')
+		.next()
+		.unwrap_or(authority)
+		.split(':')
+		.next()
+		.unwrap_or(authority);
+	let host = host.to_ascii_lowercase();
+	ALLOWED_HOSTS.contains(&host.as_str()).then_some(path)
 }
 
 pub fn parse_iso_date(value: &str) -> Option<i64> {
@@ -328,5 +354,35 @@ mod tests {
 	fn parses_timestamps_without_zone_via_fallback() {
 		assert!(parse_iso_date("2024-01-02T03:04:05.000Z").is_some());
 		assert!(parse_iso_date("2024-01-02T03:04:05").is_some());
+	}
+
+	#[aidoku_test]
+	fn series_path_accepts_only_catalog_hosts() {
+		assert_eq!(
+			series_path("https://novelbuddy.me/shadow-slave?x=1"),
+			Some("shadow-slave")
+		);
+		assert_eq!(
+			series_path("http://www.novelbuddy.me/shadow-slave/#frag"),
+			Some("shadow-slave/")
+		);
+		assert_eq!(
+			series_path("https://NOVELBUDDY.ME:443/shadow-slave"),
+			Some("shadow-slave")
+		);
+		assert_eq!(
+			series_path("https://evil.com/novelbuddy.me/shadow-slave"),
+			None
+		);
+		assert_eq!(
+			series_path("https://novelbuddy.me.evil.com/shadow-slave"),
+			None
+		);
+		assert_eq!(series_path("novelbuddy.me/shadow-slave"), None);
+		assert_eq!(series_path("javascript:novelbuddy.me/shadow-slave"), None);
+		assert_eq!(
+			series_path(r"https://evil.com\@novelbuddy.me/shadow-slave"),
+			None
+		);
 	}
 }

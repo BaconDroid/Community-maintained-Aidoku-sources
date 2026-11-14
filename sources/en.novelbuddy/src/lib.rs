@@ -15,7 +15,7 @@ mod mtl;
 mod settings;
 mod watermark;
 
-use helpers::{fetch_chapter_list, request, resolve_slug};
+use helpers::{fetch_chapter_list, request, resolve_slug, series_path};
 use markdown::to_markdown;
 use models::{ChapterDetailData, ListData, TitleDetailData, TrendingData};
 use settings::{
@@ -223,15 +223,10 @@ impl ListingProvider for NovelBuddy {
 
 impl DeepLinkHandler for NovelBuddy {
 	fn handle_deep_link(&self, url: String) -> Result<Option<DeepLinkResult>> {
-		let path = url
-			.split(['?', '#'])
-			.next()
-			.unwrap_or(&url)
-			.rsplit("novelbuddy.me")
-			.next()
-			.unwrap_or("")
-			.trim_start_matches('/')
-			.trim_end_matches('/');
+		let Some(path) = series_path(&url) else {
+			return Ok(None);
+		};
+		let path = path.trim_start_matches('/').trim_end_matches('/');
 		if path.is_empty() {
 			return Ok(None);
 		}
