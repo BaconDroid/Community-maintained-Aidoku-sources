@@ -11,6 +11,10 @@ use crate::models::{
 };
 use crate::{API_URL, BASE_URL, USER_AGENT};
 
+// Length separates the id from the slug in `/titles/<id>-<slug>`; relaxing it
+// parses `/titles/shadow-slave` as the id `shadow`.
+const CANONICAL_ID_LEN: usize = 8;
+
 pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 	let response = Request::get(url)?
 		.header("User-Agent", USER_AGENT)
@@ -185,10 +189,6 @@ pub fn parse_chapter_number(name: &str) -> Option<f32> {
 	num.parse().ok()
 }
 
-// Length separates the id from the slug in `/titles/<id>-<slug>`; relaxing it
-// parses `/titles/shadow-slave` as the id `shadow`.
-const CANONICAL_ID_LEN: usize = 8;
-
 pub fn parse_id_from_canonical(new_url: &str) -> Option<String> {
 	let trimmed = new_url.trim_start_matches("/titles/");
 	let id = trimmed.split('-').next()?;
@@ -300,7 +300,6 @@ mod tests {
 			Some("VYPGVZ8z".to_string())
 		);
 		assert_eq!(parse_id_from_canonical("/titles/garbage"), None);
-		// The length check is what keeps the slug from parsing as an id.
 		assert_eq!(parse_id_from_canonical("/titles/shadow-slave"), None);
 		assert_eq!(parse_id_from_canonical("/titles/ab-1234567"), None);
 	}
