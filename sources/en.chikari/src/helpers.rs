@@ -21,7 +21,7 @@ pub const SERIES_KEY_PREFIX: &str = "series:";
 // The API hides novels unless a type is given, so browse sends every type.
 const TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"];
 
-// The API hides erotica and pornographic tiers unless ratings are given, so browse sends every tier.
+// The API hides erotica and pornographic tiers unless requested, so browse sends every tier.
 const CONTENT_RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
 
 const STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled", "upcoming"];
