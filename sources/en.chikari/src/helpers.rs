@@ -284,7 +284,10 @@ pub fn manga_from_detail(detail: Detail, content_type: ContentType) -> Manga {
 	let slug = detail.slug;
 	let key = deep_link_manga_key(content_type, &slug);
 	let url = Some(format!("{BASE_URL}{}/{slug}", content_type.web_base()));
-	let content_rating = detail_rating(detail.is_nsfw, rated_suggestive(&detail.title, &slug).ok());
+	let content_rating = detail_rating(
+		detail.is_nsfw,
+		rated_suggestive(&detail.title, &slug, content_type).ok(),
+	);
 	let mut tags = Vec::new();
 	for name in detail.genres.into_iter().map(|g| g.name).chain(
 		detail
@@ -361,14 +364,18 @@ pub fn content_rating(is_nsfw: bool) -> ContentRating {
 
 /// `is_nsfw` cannot separate safe from suggestive, but the server can: a title
 /// appears under `content_rating=suggestive` only when the site rates it so.
-pub fn rated_suggestive(title: &str, slug: &str) -> Result<bool> {
+pub fn rated_suggestive(title: &str, slug: &str, content_type: ContentType) -> Result<bool> {
 	let mut qs = QueryParameters::new();
 	qs.push("q", Some(title));
 	qs.push("content_rating", Some("suggestive"));
 	qs.push("limit", Some("30"));
 	let url = format!("{BASE_URL}/api/series?{qs}");
 	let data: ListResponse = request(&url)?;
-	Ok(data.items.iter().any(|item| item.slug == slug))
+	Ok(data.items.iter().any(|item| {
+		item.slug == slug
+			&& ContentType::from_list_item(item.medium.as_deref(), item.kind.as_deref())
+				== content_type
+	}))
 }
 
 /// `None` means the lookup failed and establishes nothing, so the rating stays
