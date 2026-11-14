@@ -1,5 +1,3 @@
-use crate::models::{ChapterItem, ChapterListResponse, Detail, ListItem, ListResponse};
-use crate::{BASE_URL, USER_AGENT};
 use aidoku::{
 	Chapter, ContentRating, FilterValue, Manga, MangaPageResult, MangaStatus, Result, Viewer,
 	alloc::{String, Vec, string::ToString},
@@ -8,6 +6,9 @@ use aidoku::{
 	prelude::*,
 };
 use serde::de::DeserializeOwned;
+
+use crate::models::{ChapterItem, ChapterListResponse, Detail, ListItem, ListResponse};
+use crate::{BASE_URL, USER_AGENT};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ContentType {
@@ -21,9 +22,12 @@ pub const SERIES_KEY_PREFIX: &str = "series:";
 const TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"];
 
 // The API hides erotica and pornographic tiers unless ratings are given, so browse sends every tier.
-const RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
+const CONTENT_RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
 
 const STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled", "upcoming"];
+
+const ALLOWED_HOSTS: &[&str] = &["chikari.moe", "www.chikari.moe"];
+const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
 
 impl ContentType {
 	pub fn api_base(self) -> &'static str {
@@ -109,23 +113,23 @@ pub fn list_url(
 		qs.push("q", Some(query));
 	}
 	let (types_in, types_ex) = multi_select(filters, "types");
-	let (ratings_in, ratings_ex) = multi_select(filters, "ratings");
 	let (status_in, status_ex) = multi_select(filters, "status");
+	let (ratings_in, ratings_ex) = multi_select(filters, "contentRating");
 	let (Some(types), Some(ratings)) = (
 		effective(TYPES, types_in, types_ex),
-		effective(RATINGS, ratings_in, ratings_ex),
+		effective(CONTENT_RATINGS, ratings_in, ratings_ex),
 	) else {
 		return None;
 	};
 	for kind in types {
 		qs.push("type", Some(kind));
 	}
-	qs.push("content_rating", Some(&ratings.join(",")));
 	if !status_in.is_empty() || !status_ex.is_empty() {
 		for status in effective(STATUS, status_in, status_ex)? {
 			qs.push("status", Some(status));
 		}
 	}
+	qs.push("content_rating", Some(&ratings.join(",")));
 	for filter in filters {
 		let FilterValue::MultiSelect {
 			id,
@@ -429,9 +433,6 @@ pub fn parse_iso_date(value: &str) -> Option<i64> {
 	})
 }
 
-const ALLOWED_HOSTS: &[&str] = &["chikari.moe", "www.chikari.moe"];
-const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
-
 pub fn chikari_path(url: &str) -> Option<&str> {
 	let without_fragment = url.split(['?', '#']).next()?;
 	let (scheme, authority_and_path) = without_fragment.split_once("://")?;
@@ -588,7 +589,7 @@ mod tests {
 	#[aidoku_test]
 	fn list_url_sends_content_ratings() {
 		let filters = [FilterValue::MultiSelect {
-			id: "ratings".into(),
+			id: "contentRating".into(),
 			included: vec!["safe".into(), "erotica".into()],
 			excluded: vec![],
 		}];
@@ -600,9 +601,12 @@ mod tests {
 		assert!(url.contains("content_rating=safe"));
 		assert!(url.contains("pornographic"));
 		let filters = [FilterValue::MultiSelect {
-			id: "ratings".into(),
+			id: "contentRating".into(),
 			included: vec![],
-			excluded: RATINGS.iter().map(|rating| (*rating).into()).collect(),
+			excluded: CONTENT_RATINGS
+				.iter()
+				.map(|rating| (*rating).into())
+				.collect(),
 		}];
 		assert!(list_url("popular", 36, 0, None, &filters).is_none());
 	}

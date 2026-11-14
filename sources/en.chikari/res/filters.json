@@ -51,24 +51,6 @@
 	},
 	{
 		"type": "multi-select",
-		"id": "ratings",
-		"title": "Content Rating",
-		"canExclude": true,
-		"options": [
-			"Safe",
-			"Suggestive",
-			"Erotica",
-			"Pornographic"
-		],
-		"ids": [
-			"safe",
-			"suggestive",
-			"erotica",
-			"pornographic"
-		]
-	},
-	{
-		"type": "multi-select",
 		"id": "status",
 		"title": "Status",
 		"canExclude": true,
@@ -85,6 +67,24 @@
 			"hiatus",
 			"cancelled",
 			"upcoming"
+		]
+	},
+	{
+		"type": "multi-select",
+		"id": "contentRating",
+		"title": "Content Rating",
+		"canExclude": true,
+		"options": [
+			"Safe",
+			"Suggestive",
+			"Erotica",
+			"Pornographic"
+		],
+		"ids": [
+			"safe",
+			"suggestive",
+			"erotica",
+			"pornographic"
 		]
 	},
 	{

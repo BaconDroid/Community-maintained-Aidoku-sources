@@ -6,12 +6,14 @@ use aidoku::{
 	imports::std::send_partial_result,
 	prelude::*,
 };
+
 mod helpers;
 mod markdown;
 mod models;
 mod mtl;
 mod settings;
 mod watermark;
+
 use helpers::{
 	ContentType, body_to_text, decode_manga_key, deep_link_manga_key, fetch_chapters, list_url,
 	manga_from_detail, manga_page_result, request, valid_number, valid_slug,
@@ -172,12 +174,12 @@ register_source!(Chikari, ListingProvider, DeepLinkHandler);
 fn apply_settings(filters: Vec<FilterValue>) -> Vec<FilterValue> {
 	let hidden = settings::hidden_genres();
 	let selected_types = settings::type_filters();
-	let selected_ratings = settings::rating_filters();
-	let selected_status = settings::status_filters();
+	let selected_status = settings::status_filter();
+	let selected_ratings = settings::content_rating_filter();
 	if hidden.is_empty()
 		&& selected_types.is_empty()
-		&& selected_ratings.is_empty()
 		&& selected_status.is_empty()
+		&& selected_ratings.is_empty()
 	{
 		return filters;
 	}
@@ -199,8 +201,8 @@ fn apply_settings(filters: Vec<FilterValue>) -> Vec<FilterValue> {
 		}
 	}
 	push_persistent_selection(&mut filters, "types", selected_types);
-	push_persistent_selection(&mut filters, "ratings", selected_ratings);
 	push_persistent_selection(&mut filters, "status", selected_status);
+	push_persistent_selection(&mut filters, "contentRating", selected_ratings);
 	filters
 }
 
