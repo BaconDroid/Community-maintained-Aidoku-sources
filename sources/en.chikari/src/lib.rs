@@ -186,18 +186,22 @@ register_source!(Chikari, ListingProvider, DeepLinkHandler);
 mod tests {
 	use super::*;
 	use crate::helpers::chapter_key;
-	use aidoku::PageContent;
+	use aidoku::{ContentRating, PageContent};
 	use aidoku_test::aidoku_test;
 	#[aidoku_test]
 	fn search_finds_a_title_and_sees_every_content_rating() {
 		let result = Chikari
 			.get_search_manga_list(Some("shadow slave".into()), 1, Vec::new())
 			.expect("search failed");
-		assert!(
-			result
-				.entries
-				.iter()
-				.any(|m| m.title.to_ascii_lowercase().contains("shadow slave"))
+		let plain = result
+			.entries
+			.iter()
+			.find(|m| m.key == "shadow-slave")
+			.expect("expected shadow slave in results (update the slug if the catalog dropped it)");
+		assert_eq!(
+			plain.content_rating,
+			ContentRating::Safe,
+			"the site does not flag this title is_nsfw"
 		);
 
 		// The API hides erotica and pornographic unless asked, so search must
@@ -205,9 +209,15 @@ mod tests {
 		let result = Chikari
 			.get_search_manga_list(Some("city of witches".into()), 1, Vec::new())
 			.expect("search failed");
-		assert!(
-			result.entries.iter().any(|m| m.key == "city-of-witches"),
-			"expected the erotica-tier title in default results (update the slug if the catalog dropped it)"
+		let witches = result
+			.entries
+			.iter()
+			.find(|m| m.key == "city-of-witches")
+			.expect("expected the erotica-tier title in default results (update the slug if the catalog dropped it)");
+		assert_eq!(
+			witches.content_rating,
+			ContentRating::NSFW,
+			"the site flags this title is_nsfw, so it must not read as Safe"
 		);
 	}
 
