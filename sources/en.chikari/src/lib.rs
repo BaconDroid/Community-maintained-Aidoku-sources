@@ -26,12 +26,13 @@ pub const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac O
 
 const SORTS: &[&str] = &[
 	"popular",
-	"trending",
 	"top_rated",
+	"bingeable",
+	"gems",
+	"trending",
 	"updated",
 	"added",
 	"most_bookmarked",
-	"bingeable",
 	"random",
 ];
 

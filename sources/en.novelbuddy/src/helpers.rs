@@ -140,7 +140,7 @@ fn content_rating(is_adult: bool, tags: &[String]) -> ContentRating {
 }
 
 fn is_suggestive_signal(value: &str) -> bool {
-	const SUGGESTIVE_TAGS: &[&str] = &["adult", "ecchi", "smut"];
+	const SUGGESTIVE_TAGS: &[&str] = &["ecchi", "smut", "yaoi", "yuri"];
 	SUGGESTIVE_TAGS
 		.iter()
 		.any(|tag| value.trim().eq_ignore_ascii_case(tag))
@@ -257,9 +257,13 @@ const SORT_IDS: &[&str] = &[
 	"popular",
 	"latest",
 	"newest",
-	"rating",
-	"views",
 	"bookmarks",
+	"rating",
+	"views_today",
+	"views_7days",
+	"views_30days",
+	"views",
+	"chapters",
 ];
 
 const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
@@ -700,6 +704,18 @@ mod tests {
 		assert!(is_server_status("Completed"));
 		assert!(!is_server_status("hiatus"));
 		assert!(!is_server_status("cancelled"));
+	}
+
+	#[aidoku_test]
+	fn every_sort_the_ui_offers_has_a_server_value() {
+		// filters.json lists the options in the same order, so an unhandled index
+		// would silently send the wrong sort.
+		assert_eq!(SORT_IDS.len(), 10);
+		for sort in SORT_IDS {
+			assert!(!sort.is_empty());
+		}
+		assert_eq!(SORT_IDS[0], "popular");
+		assert_eq!(SORT_IDS[9], "chapters");
 	}
 
 	#[aidoku_test]

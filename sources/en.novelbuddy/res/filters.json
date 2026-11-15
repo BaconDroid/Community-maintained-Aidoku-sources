@@ -6,31 +6,27 @@
 		"canAscend": false,
 		"options": [
 			"Popular",
-			"Latest Updates",
-			"Newest",
-			"Rating",
-			"Views",
-			"Bookmarks",
-			"Best Match",
+			"Latest Updated",
+			"Recently Added",
+			"Most Followed",
+			"Highest Rating",
 			"Most Viewed: Today",
 			"Most Viewed: 7 Days",
 			"Most Viewed: 30 Days",
-			"Most Chapters",
-			"A-Z"
+			"Most Viewed: All Time",
+			"Most Chapters"
 		],
 		"ids": [
 			"popular",
 			"latest",
 			"newest",
-			"rating",
-			"views",
 			"bookmarks",
-			"best_match",
+			"rating",
 			"views_today",
 			"views_7days",
 			"views_30days",
-			"chapters",
-			"alphabetical"
+			"views",
+			"chapters"
 		],
 		"default": {
 			"index": 0,
