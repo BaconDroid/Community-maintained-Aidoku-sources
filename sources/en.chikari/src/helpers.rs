@@ -21,7 +21,7 @@ pub enum ContentType {
 
 pub const SERIES_KEY_PREFIX: &str = "series:";
 
-// The API hides novels unless a type is given, so browse sends every type.
+// The API hides novels unless a type is given, so every request sends all of them.
 const TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"];
 
 // The API hides erotica and pornographic tiers unless requested, so browse sends every tier.
