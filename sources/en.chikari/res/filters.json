@@ -6,22 +6,24 @@
 		"canAscend": false,
 		"options": [
 			"Popularity",
-			"Trending",
 			"Top Rated",
+			"Complete & Bingeable",
+			"Hidden Gems",
+			"Trending",
 			"Recently Updated",
 			"Recently Added",
 			"Most Bookmarked",
-			"Complete & Bingeable",
 			"Random"
 		],
 		"ids": [
 			"popular",
-			"trending",
 			"top_rated",
+			"bingeable",
+			"gems",
+			"trending",
 			"updated",
 			"added",
 			"most_bookmarked",
-			"bingeable",
 			"random"
 		],
 		"default": {

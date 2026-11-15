@@ -24,7 +24,9 @@ use models::{ChapterBody, ListResponse, SeriesChapterBody};
 pub const BASE_URL: &str = "https://chikari.moe";
 pub const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 
-const SORTS: &[&str] = &[
+/// Search resolves a sort filter by its position here, so this order must match
+/// the sort ids in res/filters.json.
+const SEARCH_SORTS: &[&str] = &[
 	"popular",
 	"top_rated",
 	"bingeable",
@@ -57,7 +59,7 @@ impl Source for Chikari {
 		let sort = filters
 			.iter()
 			.find_map(|filter| match filter {
-				FilterValue::Sort { index, .. } => SORTS.get(*index as usize).copied(),
+				FilterValue::Sort { index, .. } => SEARCH_SORTS.get(*index as usize).copied(),
 				_ => None,
 			})
 			.unwrap_or("popular");
@@ -133,7 +135,7 @@ impl Source for Chikari {
 
 impl ListingProvider for Chikari {
 	fn get_manga_list(&self, listing: Listing, page: i32) -> Result<MangaPageResult> {
-		let sort = SORTS
+		let sort = SEARCH_SORTS
 			.iter()
 			.find(|s| **s == listing.id)
 			.ok_or_else(|| error!("Unknown listing: {}", listing.id))?;
@@ -189,6 +191,26 @@ mod tests {
 	use crate::helpers::chapter_key;
 	use aidoku::{ContentRating, PageContent};
 	use aidoku_test::aidoku_test;
+
+	#[aidoku_test]
+	fn search_sorts_keep_the_filter_order() {
+		// The UI sends a sort option's position, so this must match res/filters.json.
+		assert_eq!(
+			SEARCH_SORTS,
+			[
+				"popular",
+				"top_rated",
+				"bingeable",
+				"gems",
+				"trending",
+				"updated",
+				"added",
+				"most_bookmarked",
+				"random",
+			]
+		);
+	}
+
 	#[aidoku_test]
 	fn search_finds_a_title_and_sees_every_content_rating() {
 		let result = Chikari

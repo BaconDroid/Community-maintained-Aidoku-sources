@@ -708,14 +708,23 @@ mod tests {
 
 	#[aidoku_test]
 	fn every_sort_the_ui_offers_has_a_server_value() {
-		// filters.json lists the options in the same order, so an unhandled index
-		// would silently send the wrong sort.
-		assert_eq!(SORT_IDS.len(), 10);
-		for sort in SORT_IDS {
-			assert!(!sort.is_empty());
-		}
-		assert_eq!(SORT_IDS[0], "popular");
-		assert_eq!(SORT_IDS[9], "chapters");
+		// These must stay in the same order as res/filters.json: the UI sends an
+		// option's position, so a reordered entry sends the wrong sort.
+		assert_eq!(
+			SORT_IDS,
+			[
+				"popular",
+				"latest",
+				"newest",
+				"bookmarks",
+				"rating",
+				"views_today",
+				"views_7days",
+				"views_30days",
+				"views",
+				"chapters",
+			]
+		);
 	}
 
 	#[aidoku_test]
