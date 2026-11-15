@@ -189,7 +189,7 @@ mod tests {
 	use aidoku::PageContent;
 	use aidoku_test::aidoku_test;
 	#[aidoku_test]
-	fn search_finds_shadow_slave() {
+	fn search_finds_a_title_and_sees_every_content_rating() {
 		let result = Chikari
 			.get_search_manga_list(Some("shadow slave".into()), 1, Vec::new())
 			.expect("search failed");
@@ -199,10 +199,9 @@ mod tests {
 				.iter()
 				.any(|m| m.title.to_ascii_lowercase().contains("shadow slave"))
 		);
-	}
 
-	#[aidoku_test]
-	fn search_sees_every_content_rating() {
+		// The API hides erotica and pornographic unless asked, so search must
+		// request every tier or this title drops out of the default results.
 		let result = Chikari
 			.get_search_manga_list(Some("city of witches".into()), 1, Vec::new())
 			.expect("search failed");

@@ -633,62 +633,28 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn filter_by_rating_empty_selection_returns_all() {
-		let entries = vec![
-			Manga {
-				key: "1".into(),
-				content_rating: ContentRating::Safe,
-				..Default::default()
-			},
-			Manga {
-				key: "2".into(),
-				content_rating: ContentRating::NSFW,
-				..Default::default()
-			},
-		];
-		assert_eq!(filter_by_rating(entries, &[]).len(), 2);
-	}
+	fn filter_by_rating_keeps_the_selected_tiers() {
+		let entry = |key: &str, rating: ContentRating| Manga {
+			key: key.into(),
+			content_rating: rating,
+			..Default::default()
+		};
+		let entries = || {
+			vec![
+				entry("safe", ContentRating::Safe),
+				entry("suggestive", ContentRating::Suggestive),
+				entry("nsfw", ContentRating::NSFW),
+			]
+		};
 
-	#[aidoku_test]
-	fn filter_by_rating_single_selection() {
-		let entries = vec![
-			Manga {
-				key: "1".into(),
-				content_rating: ContentRating::Safe,
-				..Default::default()
-			},
-			Manga {
-				key: "2".into(),
-				content_rating: ContentRating::Suggestive,
-				..Default::default()
-			},
-		];
-		let filtered = filter_by_rating(entries, &["suggestive".into()]);
-		assert_eq!(filtered.len(), 1);
-		assert_eq!(filtered[0].key, "2");
-	}
+		assert_eq!(filter_by_rating(entries(), &[]).len(), 3);
 
-	#[aidoku_test]
-	fn filter_by_rating_suggestive_and_nsfw_selection() {
-		let entries = vec![
-			Manga {
-				key: "1".into(),
-				content_rating: ContentRating::Safe,
-				..Default::default()
-			},
-			Manga {
-				key: "2".into(),
-				content_rating: ContentRating::Suggestive,
-				..Default::default()
-			},
-			Manga {
-				key: "3".into(),
-				content_rating: ContentRating::NSFW,
-				..Default::default()
-			},
-		];
-		let filtered = filter_by_rating(entries, &["suggestive".into(), "nsfw".into()]);
-		assert_eq!(filtered.len(), 2);
+		let suggestive = filter_by_rating(entries(), &["suggestive".into()]);
+		assert_eq!(suggestive.len(), 1);
+		assert_eq!(suggestive[0].key, "suggestive");
+
+		let two = filter_by_rating(entries(), &["suggestive".into(), "nsfw".into()]);
+		assert_eq!(two.len(), 2);
 	}
 
 	#[aidoku_test]

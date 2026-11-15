@@ -781,7 +781,7 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn pinned_rating_covers_each_single_tier() {
+	fn pinned_rating_applies_only_to_a_single_tier() {
 		assert_eq!(pinned_rating(&["safe"]), Some(ContentRating::Safe));
 		assert_eq!(
 			pinned_rating(&["suggestive"]),
@@ -789,10 +789,6 @@ mod tests {
 		);
 		assert_eq!(pinned_rating(&["erotica"]), Some(ContentRating::NSFW));
 		assert_eq!(pinned_rating(&["pornographic"]), Some(ContentRating::NSFW));
-	}
-
-	#[aidoku_test]
-	fn pinned_rating_needs_exactly_one_tier() {
 		assert_eq!(pinned_rating(&["safe", "suggestive"]), None);
 		assert_eq!(pinned_rating(&[]), None);
 	}
@@ -829,18 +825,10 @@ mod tests {
 	}
 
 	#[aidoku_test]
-	fn detail_rating_maps_a_confirmed_lookup() {
+	fn detail_rating_reads_the_lookup_and_the_flag() {
 		assert_eq!(detail_rating(false, Some(true)), ContentRating::Suggestive);
 		assert_eq!(detail_rating(false, Some(false)), ContentRating::Safe);
-	}
-
-	#[aidoku_test]
-	fn detail_rating_keeps_a_failed_lookup_unknown() {
 		assert_eq!(detail_rating(false, None), ContentRating::Unknown);
-	}
-
-	#[aidoku_test]
-	fn detail_rating_trusts_the_nsfw_flag_over_the_lookup() {
 		assert_eq!(detail_rating(true, Some(false)), ContentRating::NSFW);
 		assert_eq!(detail_rating(true, None), ContentRating::NSFW);
 	}

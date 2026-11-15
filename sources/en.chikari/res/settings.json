@@ -65,7 +65,7 @@
 				"refreshes": ["content"]
 			}
 		],
-		"footer": "Each selection applies when its matching filter is absent. Empty means all."
+		"footer": "Applied to search and listings unless the matching filter overrides it. Empty means all."
 	},
 	{
 		"type": "group",
@@ -171,7 +171,7 @@
 				"refreshes": ["content"]
 			}
 		],
-		"footer": "Titles with any selected genre are excluded from search results."
+		"footer": "Titles with any selected genre are hidden from search and listings."
 	},
 	{
 		"type": "group",
