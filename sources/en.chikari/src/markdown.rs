@@ -121,11 +121,7 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 	convert_children_to_markdown(element, &mut inner);
 	let marker = match element.tag_name().as_deref() {
 		Some("strong" | "b") => "**",
-		Some("em" | "i") => "*",
-		_ => {
-			output.push_str(&inner);
-			return;
-		}
+		_ => "*",
 	};
 	output.push_str(&anchored(&inner, marker, marker));
 }
@@ -197,6 +193,11 @@ fn convert_quoted(element: &Element, output: &mut String) {
 	output.push_str(&anchored(&inner, "\u{201C}", "\u{201D}"));
 }
 
+// Elements come from the WHATWG HTML index,
+// https://html.spec.whatwg.org/multipage/indices.html#elements-3 ; the obsolete
+// ones that still carry prose come from
+// https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features .
+// A tag outside both lists is dropped with its content.
 fn convert_element_to_markdown(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
@@ -207,7 +208,7 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		}
 		"br" => output.push_str("  \n"),
 		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => convert_heading(element, output),
-		"strong" | "b" | "em" | "i" | "u" | "s" | "del" => convert_emphasis(element, output),
+		"strong" | "b" | "em" | "i" => convert_emphasis(element, output),
 		"code" => convert_inline_code(element, output),
 		"q" => convert_quoted(element, output),
 		"pre" => convert_fenced_code(element, output),
@@ -221,12 +222,13 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		"blockquote" => convert_blockquote_to_markdown(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
 		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
-		| "html" | "form" | "fieldset" => convert_block_container(element, output),
+		| "html" | "form" | "fieldset" | "center" | "dir" => convert_block_container(element, output),
 		"span" | "li" | "sup" | "sub" | "ruby" | "rt" | "rp" | "small" | "mark" | "abbr"
 		| "cite" | "time" | "kbd" | "samp" | "var" | "ins" | "bdi" | "bdo" | "label" | "table"
 		| "thead" | "tbody" | "tfoot" | "tr" | "td" | "th" | "caption" | "colgroup" | "col"
 		| "wbr" | "picture" | "dfn" | "data" | "output" | "legend" | "slot" | "meter"
-		| "progress" => convert_children_to_markdown(element, output),
+		| "progress" | "u" | "s" | "del" | "font" | "big" | "tt" | "strike" | "nobr"
+		| "acronym" | "rb" | "rtc" => convert_children_to_markdown(element, output),
 		_ => {}
 	}
 }
@@ -247,10 +249,7 @@ fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
 		} else {
 			marker.push_str("- ");
 		}
-		let mut indent = String::default();
-		for _ in 0..marker.len() {
-			indent.push(' ');
-		}
+		let indent = " ".repeat(marker.len());
 		output.push_str(&marker);
 		for (line_index, line) in body.trim().lines().enumerate() {
 			if line_index > 0 {
