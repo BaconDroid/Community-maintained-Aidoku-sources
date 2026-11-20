@@ -28,7 +28,7 @@ const SENTENCE_ENDS: &[char] = &[
 	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
 ];
 
-pub(crate) fn is_prose_char(ch: char) -> bool {
+fn is_prose_char(ch: char) -> bool {
 	let code = u32::from(ch);
 	ch.is_whitespace()
 		|| PROSE_BLOCKS
@@ -437,32 +437,49 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 fn append_block(block: &str) -> String {
 	let mut kept: Vec<String> = Vec::new();
 	for raw_line in block.trim().lines() {
-		let cleaned = without_dead_pairs(raw_line);
-		let dialogue = dialogue_line(&cleaned);
-		let line = dialogue.as_str();
-		if line.trim().is_empty() {
-			continue;
-		}
-		if line.find(|ch| !is_prose_char(ch)).is_none() {
-			kept.push(line.into());
-			continue;
-		}
-		let mut parts: Vec<String> = Vec::new();
-		for sentence in sentences(line) {
-			if sentence.find(|ch| !is_prose_char(ch)).is_none() {
-				parts.push(sentence.trim().into());
-			} else if let Some(cleaned) = clean_credit_sentence(&sentence) {
-				parts.push(cleaned);
-			}
-		}
-		if !parts.is_empty() {
-			kept.push(parts.join(" "));
+		let (head, core, tail) = peel_emphasis(raw_line);
+		if let Some(line) = clean_line(core) {
+			kept.push([head, line.as_str(), tail].concat());
 		}
 	}
 	kept.join("\n").trim_end().into()
 }
 
+/// A line may open and close on the emphasis markers the converter wrote; the
+/// markers are set aside so the walls they hide are read as walls.
+fn peel_emphasis(line: &str) -> (&str, &str, &str) {
+	let open = line.len() - line.trim_start_matches('*').len();
+	let close = line.len() - line.trim_end_matches('*').len();
+	if open == 0 || close == 0 || open + close >= line.len() {
+		return ("", line, "");
+	}
+	let (head, rest) = line.split_at(open);
+	let (core, tail) = rest.split_at(rest.len() - close);
+	(head, core, tail)
+}
+
+fn clean_line(line: &str) -> Option<String> {
+	let cleaned = without_dead_pairs(line);
+	let dialogue = dialogue_line(&cleaned);
+	let line = dialogue.as_str();
+	if line.trim().is_empty() {
+		return None;
+	}
+	if line.find(|ch| !is_prose_char(ch)).is_none() {
+		return Some(line.into());
+	}
+	let mut parts: Vec<String> = Vec::new();
+	for sentence in sentences(line) {
+		if sentence.find(|ch| !is_prose_char(ch)).is_none() {
+			parts.push(sentence.trim().into());
+		} else if let Some(cleaned) = clean_credit_sentence(&sentence) {
+			parts.push(cleaned);
+		}
+	}
+	(!parts.is_empty()).then(|| parts.join(" "))
+}
+
 /// Cleans one block: the credits and the noise go, the prose stays.
-pub fn clean(block: &str) -> String {
+pub(crate) fn clean(block: &str) -> String {
 	append_block(&strip_injected(block))
 }

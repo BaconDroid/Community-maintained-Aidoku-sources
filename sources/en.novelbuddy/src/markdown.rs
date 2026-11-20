@@ -98,14 +98,6 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 		Some("strong" | "b") => "**",
 		_ => "*",
 	};
-	let core = inner.trim();
-	if core.is_empty()
-		|| !core.starts_with(watermark::is_prose_char)
-		|| !core.ends_with(watermark::is_prose_char)
-	{
-		output.push_str(&inner);
-		return;
-	}
 	output.push_str(&anchored(&inner, marker, marker));
 }
 
