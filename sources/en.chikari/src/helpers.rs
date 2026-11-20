@@ -97,12 +97,20 @@ pub fn genres() -> Result<Vec<Genre>> {
 }
 
 pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
-	Request::get(url)?
+	let response = Request::get(url)?
 		.header("User-Agent", USER_AGENT)
 		.header("Accept", "application/json")
 		.header("Referer", BASE_URL)
 		.header("Origin", BASE_URL)
-		.json_owned::<T>()
+		.send()?;
+	// A refusal comes back with an ordinary body, so the status is the only sign
+	// of it. A host that cannot report one leaves the body as the only evidence,
+	// and turning that into an error would break every request.
+	let status = response.status_code();
+	if (100..600).contains(&status) && !(200..300).contains(&status) {
+		bail!("Chikari answered {status}");
+	}
+	response.get_json_owned::<T>()
 }
 
 pub fn list_url(
