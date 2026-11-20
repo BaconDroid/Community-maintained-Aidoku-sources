@@ -8,7 +8,8 @@ use aidoku::{
 use serde::de::DeserializeOwned;
 
 use crate::models::{
-	ApiResponse, BySlugData, ChapterListData, ChapterListItem, ListData, TitleDetail, TitleListItem,
+	ApiResponse, BySlugData, ChapterListData, ChapterListItem, Genre, GenreData, ListData,
+	TitleDetail, TitleListItem,
 };
 use crate::{API_URL, BASE_URL, USER_AGENT};
 
@@ -33,6 +34,12 @@ pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 		bail!("{msg}");
 	}
 	response.data.ok_or_else(|| error!("API returned no data"))
+}
+
+pub fn genres() -> Result<Vec<Genre>> {
+	let url = format!("{API_URL}/genres");
+	let data: GenreData = request(&url)?;
+	Ok(data.items)
 }
 
 pub fn fetch_chapter_list(title_id: &str) -> Result<Vec<Chapter>> {
