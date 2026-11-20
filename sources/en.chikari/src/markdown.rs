@@ -178,8 +178,11 @@ fn convert_element(element: &Element, output: &mut String) {
 	match tag.as_str() {
 		"p" | "figcaption" | "dt" | "dd" | "summary" => {
 			break_before_block(output);
+			let length = output.len();
 			convert_children(element, output);
-			output.push_str("\n\n");
+			if output.len() > length {
+				output.push_str("\n\n");
+			}
 		}
 		"br" => output.push_str("  \n"),
 		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => convert_heading(element, output),
@@ -394,6 +397,7 @@ pub fn to_markdown(input: &str) -> String {
 			pending
 		});
 	}
+	pieces.retain(|piece| !piece.is_empty());
 	let text = pieces.join("\n\n");
 	let text = if settings::hide_watermark() {
 		blocks(&text)
