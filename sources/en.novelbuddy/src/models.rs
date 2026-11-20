@@ -89,6 +89,8 @@ pub struct TitleDetail {
 #[derive(Deserialize)]
 pub struct NamedSlug {
 	pub name: String,
+	#[serde(default)]
+	pub slug: Option<String>,
 }
 
 #[derive(Deserialize)]

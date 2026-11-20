@@ -37,12 +37,19 @@ pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 }
 
 pub fn keeps_genres(item: &TitleListItem, hidden: &[String]) -> bool {
-	let Some(slugs) = item.genre_slugs.as_deref() else {
-		return true;
-	};
-	!slugs
-		.split(',')
-		.any(|slug| hidden.iter().any(|hidden| hidden == slug.trim()))
+	// A trending entry carries the slugs in one string, a search entry carries them as objects.
+	let in_slugs = item.genre_slugs.as_deref().is_some_and(|slugs| {
+		slugs
+			.split(',')
+			.any(|slug| hidden.iter().any(|hidden| hidden == slug.trim()))
+	});
+	let in_genres = item.genres.iter().any(|genre| {
+		genre
+			.slug
+			.as_deref()
+			.is_some_and(|slug| hidden.iter().any(|hidden| hidden == slug))
+	});
+	!(in_slugs || in_genres)
 }
 
 pub fn genres() -> Result<Vec<Genre>> {
