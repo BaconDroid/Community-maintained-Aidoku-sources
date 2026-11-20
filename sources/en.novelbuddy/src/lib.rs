@@ -16,15 +16,12 @@ mod settings;
 mod watermark;
 
 use helpers::{
-	build_search_url, chapter_url_matches, deep_link_slugs, fetch_chapter_list, fetch_multi_status,
-	filter_by_rating, is_server_status, merge_with_persistent, parse_filters, request,
-	resolve_slug, series_path,
+	apply_settings, build_search_url, chapter_url_matches, deep_link_slugs, fetch_chapter_list,
+	fetch_multi_status, filter_by_rating, is_server_status, keeps_status, listing_entries,
+	parse_filters, request, resolve_slug, series_path,
 };
 use markdown::to_markdown;
 use models::{ChapterDetailData, ListData, TitleDetailData, TrendingData};
-use settings::{
-	content_rating_filter as persistent_content_rating, status_filter as persistent_status,
-};
 
 pub const BASE_URL: &str = "https://novelbuddy.me";
 pub const API_URL: &str = "https://api.novelbuddy.me";
@@ -44,14 +41,11 @@ impl Source for NovelBuddy {
 		page: i32,
 		filters: Vec<FilterValue>,
 	) -> Result<MangaPageResult> {
-		let ctx = parse_filters(filters);
+		let ctx = parse_filters(apply_settings(filters));
 		let hide = settings::hide_mtl() && !query.as_deref().is_some_and(mtl::mentions_mtl);
 
-		let all_ratings = merge_with_persistent(
-			ctx.content_rating_filter.clone(),
-			persistent_content_rating(),
-		);
-		let all_statuses = merge_with_persistent(ctx.status_filter.clone(), persistent_status());
+		let all_ratings = ctx.content_rating_filter.clone().unwrap_or_default();
+		let all_statuses = ctx.status_filter.clone().unwrap_or_default();
 
 		let match_nothing = ctx
 			.content_rating_filter
@@ -74,13 +68,7 @@ impl Source for NovelBuddy {
 			let mut entries: Vec<Manga> = data
 				.items
 				.into_iter()
-				.filter(|item| {
-					item.status.as_deref().is_some_and(|status| {
-						all_statuses
-							.iter()
-							.any(|selected| selected.eq_ignore_ascii_case(status))
-					})
-				})
+				.filter(|item| keeps_status(item, &all_statuses))
 				.map(Manga::from)
 				.collect();
 			if hide {
@@ -165,6 +153,10 @@ impl Source for NovelBuddy {
 
 impl ListingProvider for NovelBuddy {
 	fn get_manga_list(&self, listing: Listing, page: i32) -> Result<MangaPageResult> {
+		// Listings carry no filters, so the saved selections are what applies.
+		let ctx = parse_filters(apply_settings(Vec::new()));
+		let statuses = ctx.status_filter.unwrap_or_default();
+		let ratings = ctx.content_rating_filter.unwrap_or_default();
 		match listing.id.as_str() {
 			"trending-week" | "trending-today" => {
 				let window = if listing.id == "trending-week" {
@@ -174,36 +166,29 @@ impl ListingProvider for NovelBuddy {
 				};
 				let url = format!("{API_URL}/trending/titles?window={window}");
 				let data: TrendingData = request(&url)?;
-				let mut items = data.items;
-				let hidden = settings::hidden_genres();
-				if !hidden.is_empty() {
-					items.retain(|item| helpers::keeps_genres(item, &hidden));
-				}
-				let mut entries: Vec<Manga> = items.into_iter().map(Manga::from).collect();
-				if settings::hide_mtl() {
-					mtl::retain_manga(&mut entries);
-				}
-				entries = filter_by_rating(entries, &persistent_content_rating());
 				Ok(MangaPageResult {
-					entries,
+					entries: listing_entries(data.items, &statuses, &ratings),
 					has_next_page: false,
 				})
 			}
 			"latest" => {
-				let url = format!("{API_URL}/titles/search?sort=latest&page={}", page.max(1));
+				// The API knows only ongoing and completed, and refuses the rest,
+				// so a single one of those goes in the query and keeps the feed
+				// populated instead of emptying it.
+				let status = match statuses.as_slice() {
+					[only] if is_server_status(only) => Some(only.as_str()),
+					_ => None,
+				};
+				let status_param = status
+					.map(|status| format!("&status={status}"))
+					.unwrap_or_default();
+				let url = format!(
+					"{API_URL}/titles/search?sort=latest&page={}{status_param}",
+					page.max(1)
+				);
 				let data: ListData = request(&url)?;
-				let mut items = data.items;
-				let hidden = settings::hidden_genres();
-				if !hidden.is_empty() {
-					items.retain(|item| helpers::keeps_genres(item, &hidden));
-				}
-				let mut entries: Vec<Manga> = items.into_iter().map(Manga::from).collect();
-				if settings::hide_mtl() {
-					mtl::retain_manga(&mut entries);
-				}
-				entries = filter_by_rating(entries, &persistent_content_rating());
 				Ok(MangaPageResult {
-					entries,
+					entries: listing_entries(data.items, &statuses, &ratings),
 					has_next_page: data.pagination.has_next,
 				})
 			}

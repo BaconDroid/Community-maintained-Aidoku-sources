@@ -52,6 +52,37 @@ pub fn keeps_genres(item: &TitleListItem, hidden: &[String]) -> bool {
 	!(in_slugs || in_genres)
 }
 
+pub fn keeps_status(item: &TitleListItem, statuses: &[String]) -> bool {
+	if statuses.is_empty() {
+		return true;
+	}
+	item.status.as_deref().is_some_and(|status| {
+		statuses
+			.iter()
+			.any(|wanted| wanted.eq_ignore_ascii_case(status))
+	})
+}
+
+/// A listing carries no filters of its own, so the saved selections are what
+/// decides which entries it keeps.
+pub fn listing_entries(
+	items: Vec<TitleListItem>,
+	statuses: &[String],
+	ratings: &[String],
+) -> Vec<Manga> {
+	let hidden = crate::settings::hidden_genres();
+	let mut entries: Vec<Manga> = items
+		.into_iter()
+		.filter(|item| keeps_genres(item, &hidden))
+		.filter(|item| keeps_status(item, statuses))
+		.map(Manga::from)
+		.collect();
+	if crate::settings::hide_mtl() {
+		crate::mtl::retain_manga(&mut entries);
+	}
+	filter_by_rating(entries, ratings)
+}
+
 pub fn genres() -> Result<Vec<Genre>> {
 	let url = format!("{API_URL}/genres");
 	let data: GenreData = request(&url)?;
@@ -86,12 +117,18 @@ impl From<TitleListItem> for Manga {
 			}
 		}
 		let content_rating = content_rating(item.is_adult, &genre_names);
+		let status = item
+			.status
+			.as_deref()
+			.map(parse_status)
+			.unwrap_or(MangaStatus::Unknown);
 		Manga {
 			key: item.id,
 			title: item.name,
 			cover: item.cover,
 			url,
 			content_rating,
+			status,
 			..Default::default()
 		}
 	}
@@ -289,7 +326,7 @@ const SORT_IDS: &[&str] = &[
 	"chapters",
 ];
 
-const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
+pub const STATUS_IDS: &[&str] = &["ongoing", "completed", "hiatus", "cancelled"];
 
 const SERVER_STATUS_IDS: &[&str] = &["ongoing", "completed"];
 
@@ -398,15 +435,32 @@ pub fn build_search_url(
 	format!("{API_URL}/titles/search?{qs}&page={}", page.max(1))
 }
 
-pub fn merge_with_persistent(runtime: Option<Vec<String>>, persistent: Vec<String>) -> Vec<String> {
-	match runtime {
-		None => persistent,
-		Some(mut values) => {
-			values.sort();
-			values.dedup();
-			values
-		}
+/// The saved status and content rating act as defaults: they fill a search that
+/// carries neither, and they apply to listings, which carry no filters at all.
+pub fn apply_settings(filters: Vec<FilterValue>) -> Vec<FilterValue> {
+	let selected_status = crate::settings::status_filter();
+	let selected_ratings = crate::settings::content_rating_filter();
+	let mut filters = filters;
+	push_persistent_selection(&mut filters, "status", selected_status);
+	push_persistent_selection(&mut filters, "contentRating", selected_ratings);
+	filters
+}
+
+fn push_persistent_selection(filters: &mut Vec<FilterValue>, id: &str, selected: Vec<String>) {
+	if selected.is_empty() || has_filter(filters, id) {
+		return;
 	}
+	filters.push(FilterValue::MultiSelect {
+		id: id.into(),
+		included: selected,
+		excluded: Vec::new(),
+	});
+}
+
+fn has_filter(filters: &[FilterValue], id: &str) -> bool {
+	filters
+		.iter()
+		.any(|filter| matches!(filter, FilterValue::MultiSelect { id: found, .. } if found == id))
 }
 
 pub fn is_server_status(value: &str) -> bool {
