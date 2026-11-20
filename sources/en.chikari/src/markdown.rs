@@ -66,6 +66,11 @@ fn break_before_block(output: &mut String) {
 }
 
 fn convert_heading(element: &Element, output: &mut String) {
+	let mut inner = String::default();
+	convert_children(element, &mut inner);
+	if inner.trim().is_empty() {
+		return;
+	}
 	break_before_block(output);
 	let tag = element.tag_name().unwrap_or_default();
 	let level = tag.as_bytes()[1] - b'0';
@@ -73,7 +78,7 @@ fn convert_heading(element: &Element, output: &mut String) {
 		output.push('#');
 	}
 	output.push(' ');
-	convert_children(element, output);
+	output.push_str(inner.trim());
 	output.push_str("\n\n");
 }
 
@@ -105,6 +110,9 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 fn convert_inline_code(element: &Element, output: &mut String) {
 	let mut raw = String::default();
 	append_raw_text(element, &mut raw);
+	if raw.is_empty() {
+		return;
+	}
 	let ticks = longest_backtick_run(&raw) + 1;
 	for _ in 0..ticks {
 		output.push('`');
@@ -122,9 +130,12 @@ fn convert_inline_code(element: &Element, output: &mut String) {
 }
 
 fn convert_fenced_code(element: &Element, output: &mut String) {
-	break_before_block(output);
 	let mut raw = String::default();
 	append_raw_text(element, &mut raw);
+	if raw.trim().is_empty() {
+		return;
+	}
+	break_before_block(output);
 	let fence = "`".repeat(3.max(longest_backtick_run(&raw) + 1));
 	output.push_str(&fence);
 	output.push('\n');
@@ -137,12 +148,13 @@ fn convert_fenced_code(element: &Element, output: &mut String) {
 }
 
 fn convert_image(element: &Element, output: &mut String) {
+	let Some(src) = element.attr("abs:src") else {
+		return;
+	};
 	break_before_block(output);
-	if let Some(src) = element.attr("abs:src") {
-		let alt = element.attr("alt").unwrap_or_default();
-		let _ = writeln!(output, "![{alt}]({src})");
-		output.push('\n');
-	}
+	let alt = element.attr("alt").unwrap_or_default();
+	let _ = writeln!(output, "![{alt}]({src})");
+	output.push('\n');
 }
 
 fn convert_link(element: &Element, output: &mut String) {
@@ -156,8 +168,13 @@ fn convert_link(element: &Element, output: &mut String) {
 }
 
 fn convert_block_container(element: &Element, output: &mut String) {
+	let mut inner = String::default();
+	convert_children(element, &mut inner);
+	if inner.trim().is_empty() {
+		return;
+	}
 	break_before_block(output);
-	convert_children(element, output);
+	output.push_str(&inner);
 	if !output.ends_with('\n') {
 		output.push('\n');
 	}
@@ -207,15 +224,23 @@ fn convert_element(element: &Element, output: &mut String) {
 }
 
 fn convert_list(element: &Element, tag: &str, output: &mut String) {
-	break_before_block(output);
 	let ordered = tag == "ol";
-	let items: Vec<_> = element
-		.children()
-		.filter(|child| child.tag_name().as_deref() == Some("li"))
-		.collect();
-	for (index, item) in items.iter().enumerate() {
+	let mut bodies: Vec<String> = Vec::new();
+	for item in element.children() {
+		if item.tag_name().as_deref() != Some("li") {
+			continue;
+		}
 		let mut body = String::default();
-		convert_children(item, &mut body);
+		convert_children(&item, &mut body);
+		if !body.trim().is_empty() {
+			bodies.push(body);
+		}
+	}
+	if bodies.is_empty() {
+		return;
+	}
+	break_before_block(output);
+	for (index, body) in bodies.iter().enumerate() {
 		let mut marker = String::default();
 		if ordered {
 			let _ = write!(marker, "{}. ", index + 1);
@@ -244,6 +269,7 @@ fn convert_list(element: &Element, tag: &str, output: &mut String) {
 fn convert_table(element: &Element, output: &mut String) {
 	let mut rows: Vec<Vec<String>> = Vec::new();
 	table_rows(element, &mut rows);
+	rows.retain(|row| row.iter().any(|cell| !cell.trim().is_empty()));
 	let width = rows.iter().map(|row| row.len()).max().unwrap_or(0);
 	if width == 0 {
 		return;
@@ -289,9 +315,12 @@ fn table_rows(element: &Element, rows: &mut Vec<Vec<String>>) {
 }
 
 fn convert_blockquote(element: &Element, output: &mut String) {
-	break_before_block(output);
 	let mut quoted = String::default();
 	convert_children(element, &mut quoted);
+	if quoted.trim().is_empty() {
+		return;
+	}
+	break_before_block(output);
 	for (index, line) in quoted.trim_end().lines().enumerate() {
 		if index > 0 {
 			output.push('\n');
