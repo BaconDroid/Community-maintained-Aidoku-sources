@@ -1,3 +1,7 @@
+//! Kept byte-identical with `sources/en.novelbuddy/src/markdown.rs`, and with
+//! the `watermark.rs` and `mtl.rs` beside it: the two sources are separate
+//! crates, so a change here belongs in both copies.
+
 use aidoku::{
 	alloc::{String, Vec},
 	imports::html::{Element, Html, Kind},
@@ -94,6 +98,14 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 		Some("strong" | "b") => "**",
 		_ => "*",
 	};
+	let core = inner.trim();
+	if core.is_empty()
+		|| !core.starts_with(watermark::is_prose_char)
+		|| !core.ends_with(watermark::is_prose_char)
+	{
+		output.push_str(&inner);
+		return;
+	}
 	output.push_str(&anchored(&inner, marker, marker));
 }
 
@@ -153,7 +165,7 @@ fn convert_link(element: &Element, output: &mut String) {
 fn convert_block_container(element: &Element, output: &mut String) {
 	break_before_block(output);
 	convert_children_to_markdown(element, output);
-	if !output.ends_with("\n\n") && !output.ends_with('\n') {
+	if !output.ends_with('\n') {
 		output.push('\n');
 	}
 }
@@ -266,21 +278,98 @@ fn html_to_markdown(input: &str) -> String {
 	output
 }
 
-pub fn to_markdown(input: &str) -> String {
-	let text = watermark::blocks(input)
-		.into_iter()
-		.map(|block| {
-			if block.contains('<') {
-				html_to_markdown(&block).trim().into()
-			} else {
-				block
+fn blocks(text: &str) -> Vec<String> {
+	let mut blocks: Vec<String> = Vec::new();
+	let mut block = String::default();
+	for line in text.lines() {
+		if line.trim().is_empty() {
+			if !block.is_empty() {
+				blocks.push(core::mem::take(&mut block));
 			}
-		})
-		.collect::<Vec<String>>()
-		.join("\n\n");
-	if settings::hide_watermark() {
-		watermark::strip(text.trim())
-	} else {
-		text.trim().into()
+		} else {
+			block.push_str(if block.is_empty() { "" } else { "\n" });
+			block.push_str(line);
+		}
 	}
+	if !block.is_empty() {
+		blocks.push(block);
+	}
+	blocks
+}
+
+fn leaves_open(block: &str) -> bool {
+	let mut depth = 0i32;
+	let mut rest = block;
+	while let Some(index) = rest.find('<') {
+		let after = &rest[index + 1..];
+		if after.starts_with('/') {
+			depth -= 1;
+		} else if after
+			.chars()
+			.next()
+			.is_some_and(|c| c.is_ascii_alphabetic())
+		{
+			let length = after.chars().take_while(|c| c.is_alphanumeric()).count();
+			let name = &after[..length];
+			if !matches!(
+				name,
+				"br" | "img"
+					| "hr"
+					| "input"
+					| "meta"
+					| "link"
+					| "source"
+					| "track"
+					| "wbr"
+					| "col"
+					| "area"
+					| "embed"
+					| "param"
+					| "base"
+			) {
+				depth += 1;
+			}
+		}
+		rest = after;
+	}
+	depth > 0
+}
+
+pub fn to_markdown(input: &str) -> String {
+	let mut pieces: Vec<String> = Vec::new();
+	let mut pending = String::default();
+	for block in blocks(input) {
+		if !pending.is_empty() {
+			pending.push('\n');
+		}
+		pending.push_str(&block);
+		if leaves_open(&pending) {
+			continue;
+		}
+		pieces.push(if pending.contains('<') {
+			html_to_markdown(&pending).trim().into()
+		} else {
+			core::mem::take(&mut pending)
+		});
+		pending.clear();
+	}
+	if !pending.is_empty() {
+		pieces.push(if pending.contains('<') {
+			html_to_markdown(&pending).trim().into()
+		} else {
+			pending
+		});
+	}
+	let text = pieces.join("\n\n");
+	let text = if settings::hide_watermark() {
+		blocks(&text)
+			.iter()
+			.map(|block| watermark::clean(block))
+			.filter(|block| !block.is_empty())
+			.collect::<Vec<String>>()
+			.join("\n\n")
+	} else {
+		text
+	};
+	text.trim().into()
 }

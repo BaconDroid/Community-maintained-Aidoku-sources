@@ -28,7 +28,7 @@ const SENTENCE_ENDS: &[char] = &[
 	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
 ];
 
-fn is_prose_char(ch: char) -> bool {
+pub(crate) fn is_prose_char(ch: char) -> bool {
 	let code = u32::from(ch);
 	ch.is_whitespace()
 		|| PROSE_BLOCKS
@@ -462,33 +462,7 @@ fn append_block(block: &str) -> String {
 	kept.join("\n").trim_end().into()
 }
 
-/// Splits a document on blank lines; a block keeps its own lines.
-pub fn blocks(text: &str) -> Vec<String> {
-	let mut blocks: Vec<String> = Vec::new();
-	let mut block = String::default();
-	for line in text.lines() {
-		if line.trim().is_empty() {
-			if !block.is_empty() {
-				blocks.push(core::mem::take(&mut block));
-			}
-		} else {
-			block.push_str(if block.is_empty() { "" } else { "\n" });
-			block.push_str(line);
-		}
-	}
-	if !block.is_empty() {
-		blocks.push(block);
-	}
-	blocks
-}
-
-/// Cleans a document: blocks are cleaned on their own and rejoined by a blank
-/// line, and a block that keeps nothing leaves no gap.
-pub fn strip(text: &str) -> String {
-	blocks(text)
-		.iter()
-		.map(|block| append_block(&strip_injected(block)))
-		.filter(|block| !block.is_empty())
-		.collect::<Vec<String>>()
-		.join("\n\n")
+/// Cleans one block: the credits and the noise go, the prose stays.
+pub fn clean(block: &str) -> String {
+	append_block(&strip_injected(block))
 }
