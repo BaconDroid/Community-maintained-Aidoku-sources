@@ -1,45 +1,16 @@
 use aidoku::{
-	alloc::{String, Vec, string::ToString},
+	alloc::{String, Vec},
 	imports::html::{Element, Html, Kind},
 };
 use core::fmt::Write as _;
 
 use crate::{BASE_URL, settings, watermark};
 
-const VOID_TAGS: &[&str] = &["<br", "<img", "<hr"];
-
-fn has_markup(input: &str) -> bool {
-	input.contains("</") || VOID_TAGS.iter().any(|tag| input.contains(tag))
-}
-
 fn join_lines(text: &str) -> String {
-	text.lines().collect::<Vec<&str>>().join("  \n")
-}
-
-fn escape_paragraph(block: &str) -> String {
-	let mut escaped = String::default();
-	for character in block.chars() {
-		match character {
-			'&' => escaped.push_str("&amp;"),
-			'<' => escaped.push_str("&lt;"),
-			_ => escaped.push(character),
-		}
-	}
-	escaped
-}
-
-fn push_paragraph(paragraphs: &mut String, block: &str) {
-	paragraphs.push_str("<p>");
-	paragraphs.push_str(&escape_paragraph(block));
-	paragraphs.push_str("</p>");
-}
-
-fn assemble_paragraphs(input: &str) -> String {
-	let mut paragraphs = String::default();
-	for block in watermark::blocks(input) {
-		push_paragraph(&mut paragraphs, &block);
-	}
-	paragraphs
+	text.lines()
+		.filter(|line| !line.trim().is_empty())
+		.collect::<Vec<&str>>()
+		.join("  \n")
 }
 
 fn longest_backtick_run(text: &str) -> usize {
@@ -282,13 +253,8 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 	output.push_str("\n\n");
 }
 
-pub fn to_markdown(input: &str) -> String {
-	let body = if has_markup(input) {
-		input.to_string()
-	} else {
-		assemble_paragraphs(input)
-	};
-	let wrapped = ["<div id=\"md-root\">", body.as_str(), "</div>"].concat();
+fn html_to_markdown(input: &str) -> String {
+	let wrapped = ["<div id=\"md-root\">", input, "</div>"].concat();
 	let Ok(doc) = Html::parse_fragment_with_url(wrapped, BASE_URL) else {
 		return String::default();
 	};
@@ -297,9 +263,18 @@ pub fn to_markdown(input: &str) -> String {
 	if let Some(root) = doc.select_first("#md-root") {
 		convert_children_to_markdown(&root, &mut output);
 	}
-	if settings::hide_watermark() {
-		watermark::strip(output.trim())
+	output
+}
+
+pub fn to_markdown(input: &str) -> String {
+	let text = if input.contains('<') {
+		html_to_markdown(input)
 	} else {
-		output.trim().into()
+		watermark::blocks(input).join("\n\n")
+	};
+	if settings::hide_watermark() {
+		watermark::strip(text.trim())
+	} else {
+		text.trim().into()
 	}
 }
