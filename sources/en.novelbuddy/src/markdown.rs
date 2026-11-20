@@ -171,9 +171,8 @@ fn convert_quoted(element: &Element, output: &mut String) {
 
 // The elements below each have a markdown form, listed against the WHATWG
 // index at https://html.spec.whatwg.org/multipage/indices.html#elements-3 .
-// A block container keeps its line breaks, an element that holds no prose is
-// dropped, and any other tag keeps its children so an unknown wrapper never
-// costs a word.
+// A block container keeps its line breaks; a tag outside the list is dropped
+// with its content.
 fn convert_element(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
@@ -200,11 +199,7 @@ fn convert_element(element: &Element, output: &mut String) {
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
 		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
 		| "html" | "form" | "fieldset" => convert_block_container(element, output),
-		"script" | "style" | "template" | "noscript" | "iframe" | "svg" | "math" | "object"
-		| "embed" | "video" | "audio" | "source" | "track" | "canvas" | "map" | "area"
-		| "input" | "select" | "option" | "optgroup" | "textarea" | "button" | "datalist"
-		| "selectedcontent" | "head" | "meta" | "link" | "base" | "title" | "colgroup" | "col" => {}
-		_ => convert_children(element, output),
+		_ => {}
 	}
 }
 
