@@ -1,8 +1,9 @@
 #![no_std]
 use aidoku::{
-	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, PageContent, Result, Source,
-	alloc::{String, Vec, string::ToString, vec},
+	Chapter, DeepLinkHandler, DeepLinkResult, DynamicFilters, DynamicSettings, Filter, FilterValue,
+	GroupSetting, Listing, ListingProvider, Manga, MangaPageResult, MultiSelectFilter,
+	MultiSelectSetting, Page, PageContent, Result, Setting, Source,
+	alloc::{String, Vec, borrow::Cow, string::ToString, vec},
 	imports::std::send_partial_result,
 	prelude::*,
 };
@@ -173,7 +174,12 @@ impl ListingProvider for NovelBuddy {
 				};
 				let url = format!("{API_URL}/trending/titles?window={window}");
 				let data: TrendingData = request(&url)?;
-				let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
+				let mut items = data.items;
+				let hidden = settings::hidden_genres();
+				if !hidden.is_empty() {
+					items.retain(|item| helpers::keeps_genres(item, &hidden));
+				}
+				let mut entries: Vec<Manga> = items.into_iter().map(Manga::from).collect();
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
@@ -186,7 +192,12 @@ impl ListingProvider for NovelBuddy {
 			"latest" => {
 				let url = format!("{API_URL}/titles/search?sort=latest&page={}", page.max(1));
 				let data: ListData = request(&url)?;
-				let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
+				let mut items = data.items;
+				let hidden = settings::hidden_genres();
+				if !hidden.is_empty() {
+					items.retain(|item| helpers::keeps_genres(item, &hidden));
+				}
+				let mut entries: Vec<Manga> = items.into_iter().map(Manga::from).collect();
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
@@ -237,7 +248,69 @@ impl DeepLinkHandler for NovelBuddy {
 	}
 }
 
-register_source!(NovelBuddy, ListingProvider, DeepLinkHandler);
+impl DynamicFilters for NovelBuddy {
+	fn get_dynamic_filters(&self) -> Result<Vec<Filter>> {
+		let genres = helpers::genres()?;
+		let (options, ids): (Vec<Cow<'static, str>>, Vec<Cow<'static, str>>) = genres
+			.into_iter()
+			.map(|genre| (genre.name.into(), genre.slug.into()))
+			.unzip();
+		Ok(vec![
+			MultiSelectFilter {
+				id: "genres".into(),
+				title: Some("Genres".into()),
+				is_genre: true,
+				can_exclude: true,
+				uses_tag_style: true,
+				options,
+				ids: Some(ids),
+				..Default::default()
+			}
+			.into(),
+		])
+	}
+}
+
+impl DynamicSettings for NovelBuddy {
+	fn get_dynamic_settings(&self) -> Result<Vec<Setting>> {
+		let genres = helpers::genres()?;
+		let (values, titles): (Vec<Cow<'static, str>>, Vec<Cow<'static, str>>) = genres
+			.into_iter()
+			.map(|genre| (genre.slug.into(), genre.name.into()))
+			.unzip();
+		Ok(vec![
+			GroupSetting {
+				title: "Genres".into(),
+				footer: Some(
+					"Leaves these genres out of search and listings. A genre a search includes \
+					 overrides it."
+						.into(),
+				),
+				items: vec![
+					MultiSelectSetting {
+						key: "hiddenGenres".into(),
+						title: "Hidden Genres".into(),
+						values,
+						titles: Some(titles),
+						refreshes: Some(vec!["content".into()]),
+						..Default::default()
+					}
+					.into(),
+				],
+				..Default::default()
+			}
+			.into(),
+		])
+	}
+}
+
+register_source!(
+	NovelBuddy,
+	ListingProvider,
+	DeepLinkHandler,
+	DynamicFilters,
+	DynamicSettings
+);
 
 #[cfg(test)]
 mod tests {

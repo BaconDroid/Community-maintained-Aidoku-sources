@@ -10,6 +10,17 @@ pub struct ApiResponse<T> {
 }
 
 #[derive(Deserialize)]
+pub struct GenreData {
+	pub items: Vec<Genre>,
+}
+
+#[derive(Deserialize)]
+pub struct Genre {
+	pub slug: String,
+	pub name: String,
+}
+
+#[derive(Deserialize)]
 pub struct ListData {
 	pub items: Vec<TitleListItem>,
 	pub pagination: Pagination,
@@ -78,6 +89,8 @@ pub struct TitleDetail {
 #[derive(Deserialize)]
 pub struct NamedSlug {
 	pub name: String,
+	#[serde(default)]
+	pub slug: Option<String>,
 }
 
 #[derive(Deserialize)]

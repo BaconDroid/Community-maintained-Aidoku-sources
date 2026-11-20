@@ -8,7 +8,8 @@ use aidoku::{
 use serde::de::DeserializeOwned;
 
 use crate::models::{
-	ApiResponse, BySlugData, ChapterListData, ChapterListItem, ListData, TitleDetail, TitleListItem,
+	ApiResponse, BySlugData, ChapterListData, ChapterListItem, Genre, GenreData, ListData,
+	TitleDetail, TitleListItem,
 };
 use crate::{API_URL, BASE_URL, USER_AGENT};
 
@@ -33,6 +34,28 @@ pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 		bail!("{msg}");
 	}
 	response.data.ok_or_else(|| error!("API returned no data"))
+}
+
+pub fn keeps_genres(item: &TitleListItem, hidden: &[String]) -> bool {
+	// A trending entry carries the slugs in one string, a search entry carries them as objects.
+	let in_slugs = item.genre_slugs.as_deref().is_some_and(|slugs| {
+		slugs
+			.split(',')
+			.any(|slug| hidden.iter().any(|hidden| hidden == slug.trim()))
+	});
+	let in_genres = item.genres.iter().any(|genre| {
+		genre
+			.slug
+			.as_deref()
+			.is_some_and(|slug| hidden.iter().any(|hidden| hidden == slug))
+	});
+	!(in_slugs || in_genres)
+}
+
+pub fn genres() -> Result<Vec<Genre>> {
+	let url = format!("{API_URL}/genres");
+	let data: GenreData = request(&url)?;
+	Ok(data.items)
 }
 
 pub fn fetch_chapter_list(title_id: &str) -> Result<Vec<Chapter>> {
