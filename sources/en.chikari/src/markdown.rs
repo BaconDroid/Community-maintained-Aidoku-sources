@@ -4,7 +4,7 @@ use aidoku::{
 };
 use core::fmt::Write as _;
 
-use crate::{settings, watermark};
+use crate::{BASE_URL, settings, watermark};
 
 const VOID_TAGS: &[&str] = &["<br", "<img", "<hr"];
 
@@ -12,38 +12,8 @@ fn has_markup(input: &str) -> bool {
 	input.contains("</") || VOID_TAGS.iter().any(|tag| input.contains(tag))
 }
 
-fn escape_markdown_text(text: &str) -> String {
-	let mut output = String::default();
-	for (index, line) in text.lines().enumerate() {
-		if index > 0 {
-			output.push_str("  \n");
-		}
-		output.push_str(&escape_line(line));
-	}
-	output
-}
-
-fn escape_line(line: &str) -> String {
-	let trimmed = line.trim_start();
-	let indent = &line[..line.len() - trimmed.len()];
-	let marker = ordered_marker_escape_index(trimmed);
-	let mut escaped = String::default();
-	escaped.push_str(indent);
-	for (index, character) in trimmed.char_indices() {
-		if Some(index) == marker || character == '<' {
-			escaped.push('\\');
-		}
-		escaped.push(character);
-	}
-	escaped
-}
-
-fn ordered_marker_escape_index(line: &str) -> Option<usize> {
-	let digits = line.chars().take_while(char::is_ascii_digit).count();
-	if digits > 0 && line[digits..].starts_with(['.', ')']) {
-		return Some(digits);
-	}
-	None
+fn join_lines(text: &str) -> String {
+	text.lines().collect::<Vec<&str>>().join("  \n")
 }
 
 fn escape_paragraph(block: &str) -> String {
@@ -66,22 +36,8 @@ fn push_paragraph(paragraphs: &mut String, block: &str) {
 
 fn assemble_paragraphs(input: &str) -> String {
 	let mut paragraphs = String::default();
-	let mut current = String::default();
-	for line in input.lines() {
-		if line.trim().is_empty() {
-			if !current.is_empty() {
-				push_paragraph(&mut paragraphs, &current);
-				current.clear();
-			}
-		} else {
-			if !current.is_empty() {
-				current.push('\n');
-			}
-			current.push_str(line);
-		}
-	}
-	if !current.is_empty() {
-		push_paragraph(&mut paragraphs, &current);
+	for block in watermark::blocks(input) {
+		push_paragraph(&mut paragraphs, &block);
 	}
 	paragraphs
 }
@@ -112,7 +68,7 @@ fn convert_children_to_markdown(element: &Element, output: &mut String) {
 		match node.kind() {
 			Kind::TextNode => {
 				if let Some(text) = node.text() {
-					output.push_str(&escape_markdown_text(&text));
+					output.push_str(&join_lines(&text));
 				}
 			}
 			Kind::Element => {
@@ -146,21 +102,32 @@ fn convert_heading(element: &Element, output: &mut String) {
 	output.push_str("\n\n");
 }
 
+fn anchored(inner: &str, open: &str, close: &str) -> String {
+	let start = inner.len() - inner.trim_start().len();
+	let end = inner.trim_end().len();
+	if start >= end {
+		return inner.into();
+	}
+	let mut out = String::from(&inner[..start]);
+	out.push_str(open);
+	out.push_str(&inner[start..end]);
+	out.push_str(close);
+	out.push_str(&inner[end..]);
+	out
+}
+
 fn convert_emphasis(element: &Element, output: &mut String) {
 	let mut inner = String::default();
 	convert_children_to_markdown(element, &mut inner);
-	let trimmed = inner.trim();
-	if trimmed.is_empty() {
-		return;
-	}
 	let marker = match element.tag_name().as_deref() {
 		Some("strong" | "b") => "**",
 		Some("em" | "i") => "*",
-		_ => "",
+		_ => {
+			output.push_str(&inner);
+			return;
+		}
 	};
-	output.push_str(marker);
-	output.push_str(trimmed);
-	output.push_str(marker);
+	output.push_str(&anchored(&inner, marker, marker));
 }
 
 fn convert_inline_code(element: &Element, output: &mut String) {
@@ -199,7 +166,7 @@ fn convert_fenced_code(element: &Element, output: &mut String) {
 
 fn convert_image(element: &Element, output: &mut String) {
 	break_before_block(output);
-	if let Some(src) = element.attr("src") {
+	if let Some(src) = element.attr("abs:src") {
 		let alt = element.attr("alt").unwrap_or_default();
 		let _ = writeln!(output, "![{alt}]({src})");
 		output.push('\n');
@@ -207,7 +174,7 @@ fn convert_image(element: &Element, output: &mut String) {
 }
 
 fn convert_link(element: &Element, output: &mut String) {
-	if let Some(href) = element.attr("href") {
+	if let Some(href) = element.attr("abs:href") {
 		output.push('[');
 		convert_children_to_markdown(element, output);
 		let _ = write!(output, "]({href})");
@@ -227,13 +194,7 @@ fn convert_block_container(element: &Element, output: &mut String) {
 fn convert_quoted(element: &Element, output: &mut String) {
 	let mut inner = String::default();
 	convert_children_to_markdown(element, &mut inner);
-	let trimmed = inner.trim();
-	if trimmed.is_empty() {
-		return;
-	}
-	output.push('\u{201C}');
-	output.push_str(trimmed);
-	output.push('\u{201D}');
+	output.push_str(&anchored(&inner, "\u{201C}", "\u{201D}"));
 }
 
 fn convert_element_to_markdown(element: &Element, output: &mut String) {
@@ -322,64 +283,6 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 	output.push_str("\n\n");
 }
 
-fn without_empty_emphasis(text: &str) -> String {
-	let chars: Vec<char> = text.chars().collect();
-	let mut output = String::default();
-	let mut index = 0;
-	while index < chars.len() {
-		if chars[index] == '`' {
-			let mut close = index;
-			while close < chars.len() && chars[close] == '`' {
-				close += 1;
-			}
-			let width = close - index;
-			let mut after = close;
-			let mut fence = None;
-			while after < chars.len() {
-				if chars[after] == '`' {
-					let mut run = after;
-					while run < chars.len() && chars[run] == '`' {
-						run += 1;
-					}
-					let matches = if width >= 3 {
-						run - after >= width
-					} else {
-						run - after == width
-					};
-					if matches {
-						fence = Some(run);
-						break;
-					}
-					after = run;
-				} else {
-					after += 1;
-				}
-			}
-			let stop = fence.unwrap_or(close);
-			output.push_str(&chars[index..stop].iter().collect::<String>());
-			index = stop;
-			continue;
-		}
-		let mut end = index;
-		while end < chars.len() && chars[end] == '*' {
-			end += 1;
-		}
-		let bounded = (index == 0 || chars[index - 1].is_whitespace())
-			&& (end == chars.len() || chars[end].is_whitespace());
-		let emptied = (end - index) % 2 == 0 && end > index;
-		if emptied && bounded {
-			if output.ends_with(' ') && chars.get(end) == Some(&' ') {
-				output.pop();
-			}
-			index = end;
-			continue;
-		}
-		output.push(chars[index]);
-		index += 1;
-	}
-	output
-}
-
 pub fn to_markdown(input: &str) -> String {
 	let body = if has_markup(input) {
 		input.to_string()
@@ -387,7 +290,7 @@ pub fn to_markdown(input: &str) -> String {
 		assemble_paragraphs(input)
 	};
 	let wrapped = ["<div id=\"md-root\">", body.as_str(), "</div>"].concat();
-	let Ok(doc) = Html::parse_fragment(wrapped) else {
+	let Ok(doc) = Html::parse_fragment_with_url(wrapped, BASE_URL) else {
 		return String::default();
 	};
 
@@ -395,10 +298,9 @@ pub fn to_markdown(input: &str) -> String {
 	if let Some(root) = doc.select_first("#md-root") {
 		convert_children_to_markdown(&root, &mut output);
 	}
-	let text = if settings::hide_watermark() {
+	if settings::hide_watermark() {
 		watermark::strip(output.trim())
 	} else {
-		output.trim().to_string()
-	};
-	without_empty_emphasis(&text)
+		output.trim().into()
+	}
 }

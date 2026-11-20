@@ -145,12 +145,16 @@ fn sentences(text: &str) -> Vec<String> {
 		if !SENTENCE_ENDS.contains(ch) {
 			continue;
 		}
-		let mut next = index + 1;
+		let mut end = index + 1;
+		while end < chars.len() && matching_opener(chars[end]).is_some() {
+			end += 1;
+		}
+		let mut next = end;
 		while next < chars.len() && chars[next].is_whitespace() {
 			next += 1;
 		}
-		if next > index + 1 {
-			out.push(chars[start..index + 1].iter().collect());
+		if next > end {
+			out.push(chars[start..end].iter().collect());
 			start = next;
 		}
 	}
@@ -458,9 +462,8 @@ fn append_block(block: &str) -> String {
 	kept.join("\n").trim_end().into()
 }
 
-/// Cleans a document: blocks are cleaned on their own and rejoined by a blank
-/// line, and a block that keeps nothing leaves no gap.
-pub fn strip(text: &str) -> String {
+/// Splits a document on blank lines; a block keeps its own lines.
+pub fn blocks(text: &str) -> Vec<String> {
 	let mut blocks: Vec<String> = Vec::new();
 	let mut block = String::default();
 	for line in text.lines() {
@@ -477,6 +480,12 @@ pub fn strip(text: &str) -> String {
 		blocks.push(block);
 	}
 	blocks
+}
+
+/// Cleans a document: blocks are cleaned on their own and rejoined by a blank
+/// line, and a block that keeps nothing leaves no gap.
+pub fn strip(text: &str) -> String {
+	blocks(text)
 		.iter()
 		.map(|block| append_block(&strip_injected(block)))
 		.filter(|block| !block.is_empty())
