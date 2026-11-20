@@ -34,15 +34,13 @@
 					"Releasing",
 					"Completed",
 					"Hiatus",
-					"Cancelled",
-					"Upcoming"
+					"Cancelled"
 				],
 				"values": [
 					"releasing",
 					"completed",
 					"hiatus",
-					"cancelled",
-					"upcoming"
+					"cancelled"
 				],
 				"default": [],
 				"refreshes": [

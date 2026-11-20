@@ -60,15 +60,13 @@
 			"Releasing",
 			"Completed",
 			"Hiatus",
-			"Cancelled",
-			"Upcoming"
+			"Cancelled"
 		],
 		"ids": [
 			"releasing",
 			"completed",
 			"hiatus",
-			"cancelled",
-			"upcoming"
+			"cancelled"
 		]
 	},
 	{

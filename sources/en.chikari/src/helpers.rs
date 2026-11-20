@@ -27,7 +27,7 @@ pub(crate) const TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"]
 // The API hides erotica and pornographic tiers unless requested, so browse sends every tier.
 pub(crate) const CONTENT_RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
 
-pub(crate) const STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled", "upcoming"];
+pub(crate) const STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled"];
 
 const ALLOWED_HOSTS: &[&str] = &["chikari.moe", "www.chikari.moe"];
 const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
