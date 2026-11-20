@@ -89,6 +89,12 @@ pub struct ChapterItem {
 }
 
 #[derive(Deserialize)]
+pub struct Genre {
+	pub slug: String,
+	pub name: String,
+}
+
+#[derive(Deserialize)]
 pub struct ChapterBody {
 	#[serde(default)]
 	pub body: String,

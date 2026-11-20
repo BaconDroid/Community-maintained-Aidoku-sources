@@ -1,8 +1,9 @@
 #![no_std]
 use aidoku::{
-	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, Listing, ListingProvider, Manga,
-	MangaPageResult, Page, Result, Source,
-	alloc::{String, Vec},
+	Chapter, DeepLinkHandler, DeepLinkResult, DynamicFilters, DynamicSettings, Filter, FilterValue,
+	GroupSetting, Listing, ListingProvider, Manga, MangaPageResult, MultiSelectFilter,
+	MultiSelectSetting, Page, Result, Setting, Source,
+	alloc::{String, Vec, borrow::Cow, vec},
 	imports::std::send_partial_result,
 	prelude::*,
 };
@@ -183,7 +184,77 @@ impl DeepLinkHandler for Chikari {
 	}
 }
 
-register_source!(Chikari, ListingProvider, DeepLinkHandler);
+impl DynamicFilters for Chikari {
+	fn get_dynamic_filters(&self) -> Result<Vec<Filter>> {
+		let genres = helpers::genres()?;
+		let (options, ids): (Vec<Cow<'static, str>>, Vec<Cow<'static, str>>) = genres
+			.into_iter()
+			.map(|genre| (genre.name.into(), genre.slug.into()))
+			.unzip();
+		Ok(vec![
+			MultiSelectFilter {
+				id: "genres".into(),
+				title: Some("Genres".into()),
+				is_genre: true,
+				can_exclude: true,
+				uses_tag_style: true,
+				options,
+				ids: Some(ids),
+				..Default::default()
+			}
+			.into(),
+		])
+	}
+}
+
+impl DynamicSettings for Chikari {
+	fn get_dynamic_settings(&self) -> Result<Vec<Setting>> {
+		let genres = helpers::genres()?;
+		let mut values: Vec<Cow<'static, str>> = Vec::new();
+		let mut titles: Vec<Cow<'static, str>> = Vec::new();
+		for genre in genres {
+			values.push(Cow::Owned(genre.slug));
+			titles.push(Cow::Owned(genre.name));
+		}
+		for slug in settings::hidden_genres() {
+			if !values.iter().any(|value| value == &slug) {
+				titles.push(Cow::Owned(slug.clone()));
+				values.push(Cow::Owned(slug));
+			}
+		}
+		Ok(vec![
+			GroupSetting {
+				title: "Genres".into(),
+				footer: Some(
+					"Leaves these genres out of search, listings and the settings selections. A \
+					 genre a search includes overrides it."
+						.into(),
+				),
+				items: vec![
+					MultiSelectSetting {
+						key: "hiddenGenres".into(),
+						title: "Hidden Genres".into(),
+						values,
+						titles: Some(titles),
+						refreshes: Some(vec!["content".into()]),
+						..Default::default()
+					}
+					.into(),
+				],
+				..Default::default()
+			}
+			.into(),
+		])
+	}
+}
+
+register_source!(
+	Chikari,
+	ListingProvider,
+	DeepLinkHandler,
+	DynamicFilters,
+	DynamicSettings
+);
 
 #[cfg(test)]
 mod tests {

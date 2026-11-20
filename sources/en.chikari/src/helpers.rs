@@ -9,7 +9,7 @@ use aidoku::{
 use serde::de::DeserializeOwned;
 
 use crate::models::{
-	ChapterBody, ChapterItem, ChapterListResponse, Detail, ListItem, ListResponse,
+	ChapterBody, ChapterItem, ChapterListResponse, Detail, Genre, ListItem, ListResponse,
 };
 use crate::{BASE_URL, USER_AGENT};
 
@@ -90,6 +90,10 @@ pub fn decode_manga_key<'a>(key: &'a str, url: Option<&str>) -> (ContentType, &'
 	}
 	let content_type = url.map_or(ContentType::Novel, ContentType::from_url);
 	(content_type, key)
+}
+
+pub fn genres() -> Result<Vec<Genre>> {
+	request(&format!("{BASE_URL}/api/genres"))
 }
 
 pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {

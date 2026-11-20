@@ -22,7 +22,9 @@
 					"novel"
 				],
 				"default": [],
-				"refreshes": ["content"]
+				"refreshes": [
+					"content"
+				]
 			},
 			{
 				"type": "multi-select",
@@ -43,7 +45,9 @@
 					"upcoming"
 				],
 				"default": [],
-				"refreshes": ["content"]
+				"refreshes": [
+					"content"
+				]
 			},
 			{
 				"type": "multi-select",
@@ -62,116 +66,12 @@
 					"pornographic"
 				],
 				"default": [],
-				"refreshes": ["content"]
+				"refreshes": [
+					"content"
+				]
 			}
 		],
 		"footer": "Applied to search and listings unless the matching filter overrides it. Empty means all."
-	},
-	{
-		"type": "group",
-		"title": "Content Filters",
-		"items": [
-			{
-				"type": "multi-select",
-				"key": "hiddenGenres",
-				"title": "Hidden Genres",
-				"titles": [
-					"Action",
-					"Adult",
-					"Adventure",
-					"Award Winning",
-					"Boys Love",
-					"Comedy",
-					"Doujinshi",
-					"Drama",
-					"Ecchi",
-					"Erotica",
-					"Fantasy",
-					"Gender Bender",
-					"Girls Love",
-					"Gourmet",
-					"Harem",
-					"Historical",
-					"Horror",
-					"Josei",
-					"Lolicon",
-					"Mahou Shoujo",
-					"Martial Arts",
-					"Mature",
-					"Mecha",
-					"Music",
-					"Mystery",
-					"Psychological",
-					"Romance",
-					"School Life",
-					"Sci-Fi",
-					"Seinen",
-					"Shotacon",
-					"Shoujo",
-					"Shoujo Ai",
-					"Shounen",
-					"Shounen Ai",
-					"Slice of Life",
-					"Smut",
-					"Sports",
-					"Supernatural",
-					"Suspense",
-					"Thriller",
-					"Tragedy",
-					"Yaoi",
-					"Yuri"
-				],
-				"values": [
-					"action",
-					"adult",
-					"adventure",
-					"award_winning",
-					"boys_love",
-					"comedy",
-					"doujinshi",
-					"drama",
-					"ecchi",
-					"erotica",
-					"fantasy",
-					"gender_bender",
-					"girls_love",
-					"gourmet",
-					"harem",
-					"historical",
-					"horror",
-					"josei",
-					"lolicon",
-					"mahou_shoujo",
-					"martial_arts",
-					"mature",
-					"mecha",
-					"music",
-					"mystery",
-					"psychological",
-					"romance",
-					"school_life",
-					"sci-fi",
-					"seinen",
-					"shotacon",
-					"shoujo",
-					"shoujo_ai",
-					"shounen",
-					"shounen_ai",
-					"slice_of_life",
-					"smut",
-					"sports",
-					"supernatural",
-					"suspense",
-					"thriller",
-					"tragedy",
-					"yaoi",
-					"yuri"
-				],
-				"default": [],
-				"refreshes": ["content"]
-			}
-		],
-		"footer": "Titles with any selected genre are hidden from search and listings."
 	},
 	{
 		"type": "group",
@@ -190,7 +90,9 @@
 				"title": "Hide MTL",
 				"subtitle": "Hide titles and chapters with MTL in the name",
 				"default": false,
-				"refreshes": ["content"]
+				"refreshes": [
+					"content"
+				]
 			}
 		]
 	}
