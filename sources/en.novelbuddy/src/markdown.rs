@@ -10,6 +10,12 @@ use core::fmt::Write as _;
 
 use crate::{BASE_URL, settings, watermark};
 
+// Tags that close themselves, so they never keep a block open.
+const VOID_TAGS: &[&str] = &[
+	"br", "img", "hr", "input", "meta", "link", "source", "track", "wbr", "col", "area", "embed",
+	"param", "base",
+];
+
 fn join_lines(text: &str) -> String {
 	text.lines()
 		.filter(|line| !line.is_empty())
@@ -393,22 +399,7 @@ fn leaves_open(block: &str) -> bool {
 		{
 			let length = body.chars().take_while(|c| c.is_alphanumeric()).count();
 			let name = &body[..length];
-			if !matches!(
-				name,
-				"br" | "img"
-					| "hr"
-					| "input"
-					| "meta"
-					| "link"
-					| "source"
-					| "track"
-					| "wbr"
-					| "col"
-					| "area"
-					| "embed"
-					| "param"
-					| "base"
-			) {
+			if !VOID_TAGS.contains(&name) {
 				depth += 1;
 			}
 		}
