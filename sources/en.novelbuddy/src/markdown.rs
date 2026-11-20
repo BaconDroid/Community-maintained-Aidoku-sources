@@ -242,13 +242,13 @@ fn convert_list(element: &Element, tag: &str, output: &mut String) {
 }
 
 fn convert_table(element: &Element, output: &mut String) {
-	break_before_block(output);
 	let mut rows: Vec<Vec<String>> = Vec::new();
 	table_rows(element, &mut rows);
 	let width = rows.iter().map(|row| row.len()).max().unwrap_or(0);
 	if width == 0 {
 		return;
 	}
+	break_before_block(output);
 	for (index, row) in rows.iter().enumerate() {
 		output.push('|');
 		for column in 0..width {
@@ -339,15 +339,21 @@ fn leaves_open(block: &str) -> bool {
 	let mut rest = block;
 	while let Some(index) = rest.find('<') {
 		let after = &rest[index + 1..];
-		if after.starts_with('/') {
-			depth -= 1;
-		} else if after
-			.chars()
-			.next()
-			.is_some_and(|c| c.is_ascii_alphabetic())
+		let end = after.find('>').unwrap_or(after.len());
+		let body = &after[..end];
+		if let Some(rest_of_tag) = body.strip_prefix('/') {
+			if rest_of_tag
+				.chars()
+				.next()
+				.is_some_and(|c| c.is_ascii_alphabetic())
+			{
+				depth = (depth - 1).max(0);
+			}
+		} else if !body.ends_with('/')
+			&& body.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
 		{
-			let length = after.chars().take_while(|c| c.is_alphanumeric()).count();
-			let name = &after[..length];
+			let length = body.chars().take_while(|c| c.is_alphanumeric()).count();
+			let name = &body[..length];
 			if !matches!(
 				name,
 				"br" | "img"
