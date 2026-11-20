@@ -174,7 +174,12 @@ impl ListingProvider for NovelBuddy {
 				};
 				let url = format!("{API_URL}/trending/titles?window={window}");
 				let data: TrendingData = request(&url)?;
-				let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
+				let mut items = data.items;
+				let hidden = settings::hidden_genres();
+				if !hidden.is_empty() {
+					items.retain(|item| helpers::keeps_genres(item, &hidden));
+				}
+				let mut entries: Vec<Manga> = items.into_iter().map(Manga::from).collect();
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}
@@ -187,7 +192,12 @@ impl ListingProvider for NovelBuddy {
 			"latest" => {
 				let url = format!("{API_URL}/titles/search?sort=latest&page={}", page.max(1));
 				let data: ListData = request(&url)?;
-				let mut entries: Vec<Manga> = data.items.into_iter().map(Manga::from).collect();
+				let mut items = data.items;
+				let hidden = settings::hidden_genres();
+				if !hidden.is_empty() {
+					items.retain(|item| helpers::keeps_genres(item, &hidden));
+				}
+				let mut entries: Vec<Manga> = items.into_iter().map(Manga::from).collect();
 				if settings::hide_mtl() {
 					mtl::retain_manga(&mut entries);
 				}

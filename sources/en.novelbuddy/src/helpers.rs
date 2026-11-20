@@ -36,6 +36,15 @@ pub fn request<T: DeserializeOwned>(url: &str) -> Result<T> {
 	response.data.ok_or_else(|| error!("API returned no data"))
 }
 
+pub fn keeps_genres(item: &TitleListItem, hidden: &[String]) -> bool {
+	let Some(slugs) = item.genre_slugs.as_deref() else {
+		return true;
+	};
+	!slugs
+		.split(',')
+		.any(|slug| hidden.iter().any(|hidden| hidden == slug.trim()))
+}
+
 pub fn genres() -> Result<Vec<Genre>> {
 	let url = format!("{API_URL}/genres");
 	let data: GenreData = request(&url)?;
