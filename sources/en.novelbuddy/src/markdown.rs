@@ -12,7 +12,7 @@ use crate::{BASE_URL, settings, watermark};
 
 fn join_lines(text: &str) -> String {
 	text.lines()
-		.filter(|line| !line.trim().is_empty())
+		.filter(|line| !line.is_empty())
 		.collect::<Vec<&str>>()
 		.join("  \n")
 }
