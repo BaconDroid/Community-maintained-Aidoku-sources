@@ -210,10 +210,18 @@ impl DynamicFilters for Chikari {
 impl DynamicSettings for Chikari {
 	fn get_dynamic_settings(&self) -> Result<Vec<Setting>> {
 		let genres = helpers::genres()?;
-		let (values, titles): (Vec<Cow<'static, str>>, Vec<Cow<'static, str>>) = genres
-			.into_iter()
-			.map(|genre| (genre.slug.into(), genre.name.into()))
-			.unzip();
+		let mut values: Vec<Cow<'static, str>> = Vec::new();
+		let mut titles: Vec<Cow<'static, str>> = Vec::new();
+		for genre in genres {
+			values.push(Cow::Owned(genre.slug));
+			titles.push(Cow::Owned(genre.name));
+		}
+		for slug in settings::hidden_genres() {
+			if !values.iter().any(|value| value == &slug) {
+				titles.push(Cow::Owned(slug.clone()));
+				values.push(Cow::Owned(slug));
+			}
+		}
 		Ok(vec![
 			GroupSetting {
 				title: "Genres".into(),
