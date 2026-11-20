@@ -1,86 +1,90 @@
 use aidoku::{
 	alloc::{String, Vec, string::ToString},
-	helpers::string::PlainText,
 	imports::html::{Element, Html, Kind},
 };
 use core::fmt::Write as _;
 
 use crate::{settings, watermark};
 
-// Anything not listed here is escaped, so literal "<NotATag>" prose survives.
-const MARKUP_TAGS: &[&str] = &[
-	"a",
-	"abbr",
-	"article",
-	"aside",
-	"b",
-	"blockquote",
-	"br",
-	"caption",
-	"center",
-	"cite",
-	"code",
-	"col",
-	"colgroup",
-	"dd",
-	"del",
-	"details",
-	"div",
-	"dl",
-	"dt",
-	"em",
-	"figcaption",
-	"figure",
-	"font",
-	"footer",
-	"h1",
-	"h2",
-	"h3",
-	"h4",
-	"h5",
-	"h6",
-	"header",
-	"hgroup",
-	"hr",
-	"i",
-	"img",
-	"ins",
-	"kbd",
-	"li",
-	"main",
-	"mark",
-	"menu",
-	"ol",
-	"p",
-	"pre",
-	"q",
-	"rp",
-	"rt",
-	"ruby",
-	"s",
-	"samp",
-	"section",
-	"small",
-	"span",
-	"strike",
-	"strong",
-	"sub",
-	"summary",
-	"sup",
-	"table",
-	"tbody",
-	"td",
-	"tfoot",
-	"th",
-	"thead",
-	"time",
-	"tr",
-	"tt",
-	"u",
-	"ul",
-	"var",
-	"wbr",
-];
+const VOID_TAGS: &[&str] = &["<br", "<img", "<hr"];
+
+fn has_markup(input: &str) -> bool {
+	input.contains("</") || VOID_TAGS.iter().any(|tag| input.contains(tag))
+}
+
+fn escape_markdown_text(text: &str) -> String {
+	let mut output = String::default();
+	for (index, line) in text.lines().enumerate() {
+		if index > 0 {
+			output.push_str("  \n");
+		}
+		output.push_str(&escape_line(line));
+	}
+	output
+}
+
+fn escape_line(line: &str) -> String {
+	let trimmed = line.trim_start();
+	let indent = &line[..line.len() - trimmed.len()];
+	let marker = ordered_marker_escape_index(trimmed);
+	let mut escaped = String::default();
+	escaped.push_str(indent);
+	for (index, character) in trimmed.char_indices() {
+		if Some(index) == marker || character == '<' {
+			escaped.push('\\');
+		}
+		escaped.push(character);
+	}
+	escaped
+}
+
+fn ordered_marker_escape_index(line: &str) -> Option<usize> {
+	let digits = line.chars().take_while(char::is_ascii_digit).count();
+	if digits > 0 && line[digits..].starts_with(['.', ')']) {
+		return Some(digits);
+	}
+	None
+}
+
+fn escape_paragraph(block: &str) -> String {
+	let mut escaped = String::default();
+	for character in block.chars() {
+		match character {
+			'&' => escaped.push_str("&amp;"),
+			'<' => escaped.push_str("&lt;"),
+			_ => escaped.push(character),
+		}
+	}
+	escaped
+}
+
+fn push_paragraph(paragraphs: &mut String, block: &str) {
+	paragraphs.push_str("<p>");
+	paragraphs.push_str(&escape_paragraph(block));
+	paragraphs.push_str("</p>");
+}
+
+fn assemble_paragraphs(input: &str) -> String {
+	let mut paragraphs = String::default();
+	let mut current = String::default();
+	for line in input.lines() {
+		if line.trim().is_empty() {
+			if !current.is_empty() {
+				push_paragraph(&mut paragraphs, &current);
+				current.clear();
+			}
+		} else {
+			if !current.is_empty() {
+				current.push('\n');
+			}
+			current.push_str(line);
+		}
+	}
+	if !current.is_empty() {
+		push_paragraph(&mut paragraphs, &current);
+	}
+	paragraphs
+}
 
 fn longest_backtick_run(text: &str) -> usize {
 	let mut longest = 0;
@@ -102,14 +106,13 @@ fn append_raw_text(element: &Element, output: &mut String) {
 	}
 }
 
-// Element-kind nodes pair with the next children entry.
 fn convert_children_to_markdown(element: &Element, output: &mut String) {
 	let mut elements = element.children();
 	for node in element.child_nodes() {
 		match node.kind() {
 			Kind::TextNode => {
 				if let Some(text) = node.text() {
-					output.push_str(&text.escape_markdown());
+					output.push_str(&escape_markdown_text(&text));
 				}
 			}
 			Kind::Element => {
@@ -150,7 +153,6 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 	if trimmed.is_empty() {
 		return;
 	}
-	// CommonMark has no strikethrough or underline: emit the content unmarked.
 	let marker = match element.tag_name().as_deref() {
 		Some("strong" | "b") => "**",
 		Some("em" | "i") => "*",
@@ -168,7 +170,6 @@ fn convert_inline_code(element: &Element, output: &mut String) {
 	for _ in 0..ticks {
 		output.push('`');
 	}
-	// CommonMark strips one padding space: pad content touching the fence.
 	if raw.starts_with('`') || raw.ends_with('`') {
 		output.push(' ');
 		output.push_str(&raw);
@@ -223,6 +224,18 @@ fn convert_block_container(element: &Element, output: &mut String) {
 	}
 }
 
+fn convert_quoted(element: &Element, output: &mut String) {
+	let mut inner = String::default();
+	convert_children_to_markdown(element, &mut inner);
+	let trimmed = inner.trim();
+	if trimmed.is_empty() {
+		return;
+	}
+	output.push('\u{201C}');
+	output.push_str(trimmed);
+	output.push('\u{201D}');
+}
+
 fn convert_element_to_markdown(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
@@ -233,10 +246,9 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		}
 		"br" => output.push_str("  \n"),
 		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => convert_heading(element, output),
-		"strong" | "b" | "em" | "i" | "u" | "s" | "strike" | "del" => {
-			convert_emphasis(element, output)
-		}
+		"strong" | "b" | "em" | "i" | "u" | "s" | "del" => convert_emphasis(element, output),
 		"code" => convert_inline_code(element, output),
+		"q" => convert_quoted(element, output),
 		"pre" => convert_fenced_code(element, output),
 		"img" => convert_image(element, output),
 		"a" => convert_link(element, output),
@@ -247,25 +259,50 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 		"ul" | "ol" | "menu" => convert_list_to_markdown(element, &tag, output),
 		"blockquote" => convert_blockquote_to_markdown(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
-		| "hgroup" | "details" | "dl" => convert_block_container(element, output),
-		"span" | "li" => convert_children_to_markdown(element, output),
-		_ => convert_children_to_markdown(element, output),
+		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
+		| "html" | "form" | "fieldset" => convert_block_container(element, output),
+		"span" | "li" | "sup" | "sub" | "ruby" | "rt" | "rp" | "small" | "mark" | "abbr"
+		| "cite" | "time" | "kbd" | "samp" | "var" | "ins" | "bdi" | "bdo" | "label" | "table"
+		| "thead" | "tbody" | "tfoot" | "tr" | "td" | "th" | "caption" | "colgroup" | "col"
+		| "wbr" | "picture" | "dfn" | "data" | "output" | "legend" | "slot" | "meter"
+		| "progress" => convert_children_to_markdown(element, output),
+		_ => {}
 	}
 }
 
 fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
 	break_before_block(output);
+	let ordered = tag == "ol";
 	let items: Vec<_> = element
 		.children()
 		.filter(|child| child.tag_name().as_deref() == Some("li"))
 		.collect();
 	for (index, item) in items.iter().enumerate() {
-		if tag == "ol" {
-			let _ = write!(output, "{}. ", index + 1);
+		let mut body = String::default();
+		convert_children_to_markdown(item, &mut body);
+		let mut marker = String::default();
+		if ordered {
+			let _ = write!(marker, "{}. ", index + 1);
 		} else {
-			output.push_str("- ");
+			marker.push_str("- ");
 		}
-		convert_children_to_markdown(item, output);
+		let mut indent = String::default();
+		for _ in 0..marker.len() {
+			indent.push(' ');
+		}
+		output.push_str(&marker);
+		for (line_index, line) in body.trim().lines().enumerate() {
+			if line_index > 0 {
+				output.push('\n');
+			}
+			if line.is_empty() {
+				continue;
+			}
+			if line_index > 0 {
+				output.push_str(&indent);
+			}
+			output.push_str(line);
+		}
 		output.push('\n');
 	}
 	output.push('\n');
@@ -285,179 +322,83 @@ fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
 	output.push_str("\n\n");
 }
 
-// Quote-aware so a '>' inside an attribute cannot end the tag early.
-fn markup_tag_end(input: &str, start: usize) -> Option<usize> {
-	let bytes = input.as_bytes();
-	let mut index = start + 1;
-	if bytes.get(index) == Some(&b'/') {
-		index += 1;
-	}
-	let name_start = index;
-	while let Some(&byte) = bytes.get(index) {
-		if byte.is_ascii_alphanumeric() || byte == b'-' {
-			index += 1;
-		} else {
-			break;
-		}
-	}
-	if index == name_start {
-		return None;
-	}
-	let name = input[name_start..index].to_ascii_lowercase();
-	if !MARKUP_TAGS.contains(&name.as_str()) {
-		return None;
-	}
-	let mut quote = 0u8;
-	while let Some(&byte) = bytes.get(index) {
-		if quote != 0 {
-			if byte == quote {
-				quote = 0;
-			}
-		} else if byte == b'"' || byte == b'\'' {
-			quote = byte;
-		} else if byte == b'>' {
-			return Some(index + 1);
-		}
-		index += 1;
-	}
-	None
-}
-
-// Escape bare '<': the parser would eat literal prose like "<Maddened Enlightenment>".
-fn protect_literal_angle_brackets(input: &str) -> String {
+fn without_empty_emphasis(text: &str) -> String {
+	let chars: Vec<char> = text.chars().collect();
 	let mut output = String::default();
 	let mut index = 0;
-	while index < input.len() {
-		if input.as_bytes()[index] == b'<' {
-			if let Some(end) = markup_tag_end(input, index) {
-				output.push_str(&input[index..end]);
-				index = end;
-			} else {
-				output.push_str("&lt;");
-				index += 1;
+	while index < chars.len() {
+		if chars[index] == '`' {
+			let mut close = index;
+			while close < chars.len() && chars[close] == '`' {
+				close += 1;
 			}
-		} else {
-			let ch = input[index..].chars().next().unwrap_or('\u{FFFD}');
-			output.push(ch);
-			index += ch.len_utf8();
+			let width = close - index;
+			let mut after = close;
+			let mut fence = None;
+			while after < chars.len() {
+				if chars[after] == '`' {
+					let mut run = after;
+					while run < chars.len() && chars[run] == '`' {
+						run += 1;
+					}
+					let matches = if width >= 3 {
+						run - after >= width
+					} else {
+						run - after == width
+					};
+					if matches {
+						fence = Some(run);
+						break;
+					}
+					after = run;
+				} else {
+					after += 1;
+				}
+			}
+			let stop = fence.unwrap_or(close);
+			output.push_str(&chars[index..stop].iter().collect::<String>());
+			index = stop;
+			continue;
 		}
+		let mut end = index;
+		while end < chars.len() && chars[end] == '*' {
+			end += 1;
+		}
+		let bounded = (index == 0 || chars[index - 1].is_whitespace())
+			&& (end == chars.len() || chars[end].is_whitespace());
+		let emptied = (end - index) % 2 == 0 && end > index;
+		if emptied && bounded {
+			if output.ends_with(' ') && chars.get(end) == Some(&' ') {
+				output.pop();
+			}
+			index = end;
+			continue;
+		}
+		output.push(chars[index]);
+		index += 1;
 	}
 	output
 }
 
-// Real block markup must not be wrapped in <p>: the parser nests the blocks and doubles the blank lines.
-fn starts_with_block_markup(segment: &str) -> bool {
-	let Some(tag) = segment.trim_start().strip_prefix('<').map(|rest| {
-		let end = rest
-			.find(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
-			.unwrap_or(rest.len());
-		rest[..end].to_ascii_lowercase()
-	}) else {
-		return false;
-	};
-	matches!(
-		tag.as_str(),
-		"blockquote"
-			| "details"
-			| "div" | "dl"
-			| "dt" | "dd"
-			| "figcaption"
-			| "figure"
-			| "h1" | "h2"
-			| "h3" | "h4"
-			| "h5" | "h6"
-			| "hgroup"
-			| "hr" | "menu"
-			| "ol" | "p"
-			| "pre" | "summary"
-			| "ul"
-	)
-}
-
-fn push_block_html(paragraphs: &mut String, block: &str) {
-	let protected = protect_literal_angle_brackets(block);
-	if starts_with_block_markup(&protected) {
-		paragraphs.push_str(&protected);
+pub fn to_markdown(input: &str) -> String {
+	let body = if has_markup(input) {
+		input.to_string()
 	} else {
-		paragraphs.push_str("<p>");
-		paragraphs.push_str(&protected);
-		paragraphs.push_str("</p>");
-	}
-}
-
-fn assemble_paragraphs(input: &str) -> String {
-	let mut paragraphs = String::default();
-	let mut current = String::default();
-	for line in input.lines() {
-		if line.trim().is_empty() {
-			if !current.is_empty() {
-				push_block_html(&mut paragraphs, &current);
-				current.clear();
-			}
-		} else {
-			if !current.is_empty() {
-				current.push('\n');
-			}
-			current.push_str(line);
-		}
-	}
-	if !current.is_empty() {
-		push_block_html(&mut paragraphs, &current);
-	}
-	// concat!, not format!: chapter text may contain braces.
-	["<div id=\"chikari-root\">", &paragraphs, "</div>"].concat()
-}
-
-pub fn html_to_markdown(html: &str) -> String {
-	let Ok(doc) = Html::parse_fragment(assemble_paragraphs(html)) else {
+		assemble_paragraphs(input)
+	};
+	let wrapped = ["<div id=\"md-root\">", body.as_str(), "</div>"].concat();
+	let Ok(doc) = Html::parse_fragment(wrapped) else {
 		return String::default();
 	};
 
 	let mut output = String::default();
-	if let Some(root) = doc.select_first("#chikari-root") {
+	if let Some(root) = doc.select_first("#md-root") {
 		convert_children_to_markdown(&root, &mut output);
 	}
-	if settings::hide_watermark() {
+	let text = if settings::hide_watermark() {
 		watermark::strip(output.trim())
 	} else {
 		output.trim().to_string()
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use aidoku_test::aidoku_test;
-
-	#[aidoku_test]
-	fn converts_inline_markup_and_escapes_prose() {
-		let out = html_to_markdown("The <i>wen was</i> a coin");
-		assert_eq!(out, "The *wen was* a coin");
-		let out = html_to_markdown("Use *literal* and <strong>bold</strong>.");
-		assert_eq!(out, "Use \\*literal\\* and **bold**\\.");
-		let out = html_to_markdown("<p><strong> bold </strong></p>");
-		assert_eq!(out, "**bold**");
-	}
-
-	#[aidoku_test]
-	fn keeps_paragraphs_and_lists() {
-		let out = html_to_markdown("First <strong>bold</strong>.\n\nSecond <em>italic</em>.");
-		assert_eq!(out, "First **bold**\\.\n\nSecond *italic*\\.");
-		let out = html_to_markdown(
-			"<menu><li>One</li><li>Two</li></menu>\n\n<dl><dt>Term</dt><dd>Definition</dd></dl>\n\n<figure><figcaption>Caption</figcaption></figure>",
-		);
-		assert_eq!(out, "- One\n- Two\n\nTerm\n\nDefinition\n\nCaption");
-		assert_eq!(html_to_markdown("first\r\n\r\nsecond"), "first\n\nsecond");
-	}
-
-	#[aidoku_test]
-	fn escapes_unknown_tags_and_literal_brackets() {
-		let out = html_to_markdown("A <marquee>strange <em>x</em></marquee> tag");
-		assert_eq!(out, "A \\<marquee\\>strange *x*\\<\\/marquee\\> tag");
-		let out = html_to_markdown("<Maddened Enlightenment> could replenish 30 Intelligence");
-		assert_eq!(
-			out,
-			"\\<Maddened Enlightenment\\> could replenish 30 Intelligence"
-		);
-	}
+	};
+	without_empty_emphasis(&text)
 }

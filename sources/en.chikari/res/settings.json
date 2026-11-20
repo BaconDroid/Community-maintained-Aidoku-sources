@@ -26,25 +26,6 @@
 			},
 			{
 				"type": "multi-select",
-				"key": "ratings",
-				"title": "Content Rating",
-				"titles": [
-					"Safe",
-					"Suggestive",
-					"Erotica",
-					"Pornographic"
-				],
-				"values": [
-					"safe",
-					"suggestive",
-					"erotica",
-					"pornographic"
-				],
-				"default": [],
-				"refreshes": ["content"]
-			},
-			{
-				"type": "multi-select",
 				"key": "status",
 				"title": "Status",
 				"titles": [
@@ -63,9 +44,28 @@
 				],
 				"default": [],
 				"refreshes": ["content"]
+			},
+			{
+				"type": "multi-select",
+				"key": "contentRating",
+				"title": "Content Rating",
+				"titles": [
+					"Safe",
+					"Suggestive",
+					"Erotica",
+					"Pornographic"
+				],
+				"values": [
+					"safe",
+					"suggestive",
+					"erotica",
+					"pornographic"
+				],
+				"default": [],
+				"refreshes": ["content"]
 			}
 		],
-		"footer": "Each selection applies when its matching filter is absent. Empty means all."
+		"footer": "Applied to search and listings unless the matching filter overrides it. Empty means all."
 	},
 	{
 		"type": "group",
@@ -171,7 +171,7 @@
 				"refreshes": ["content"]
 			}
 		],
-		"footer": "Titles with any selected genre are excluded from search results."
+		"footer": "Titles with any selected genre are hidden from search and listings."
 	},
 	{
 		"type": "group",
@@ -181,7 +181,16 @@
 				"type": "switch",
 				"key": "hideWatermark",
 				"title": "Hide Watermark",
+				"subtitle": "Remove the source-credit line the site injects into chapters",
 				"default": false
+			},
+			{
+				"type": "switch",
+				"key": "hideMtl",
+				"title": "Hide MTL",
+				"subtitle": "Hide titles and chapters with MTL in the name",
+				"default": false,
+				"refreshes": ["content"]
 			}
 		]
 	}
