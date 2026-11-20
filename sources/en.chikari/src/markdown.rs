@@ -267,11 +267,17 @@ fn html_to_markdown(input: &str) -> String {
 }
 
 pub fn to_markdown(input: &str) -> String {
-	let text = if input.contains('<') {
-		html_to_markdown(input)
-	} else {
-		watermark::blocks(input).join("\n\n")
-	};
+	let text = watermark::blocks(input)
+		.into_iter()
+		.map(|block| {
+			if block.contains('<') {
+				html_to_markdown(&block).trim().into()
+			} else {
+				block
+			}
+		})
+		.collect::<Vec<String>>()
+		.join("\n\n");
 	if settings::hide_watermark() {
 		watermark::strip(text.trim())
 	} else {
