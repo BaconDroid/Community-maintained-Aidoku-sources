@@ -101,7 +101,7 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 	convert_children(element, &mut inner);
 	let marker = match element.tag_name().as_deref() {
 		Some("strong" | "b") => "**",
-		Some("s" | "del") => "~~",
+		Some("s" | "del" | "strike") => "~~",
 		_ => "*",
 	};
 	output.push_str(&anchored(&inner, marker, marker));
@@ -189,10 +189,11 @@ fn convert_quoted(element: &Element, output: &mut String) {
 	output.push_str(&anchored(&inner, "\u{201C}", "\u{201D}"));
 }
 
-// The elements below each have a markdown form, listed against the WHATWG
+// Elements with a markdown form are converted below, listed against the WHATWG
 // index at https://html.spec.whatwg.org/multipage/indices.html#elements-3 .
-// A block container keeps its line breaks; a tag outside the list is dropped
-// with its content.
+// A structural container keeps its line breaks, an inline wrapper keeps its
+// text, and any other tag is dropped with its content, because an unknown tag
+// is as likely to hold scrap as prose.
 fn convert_element(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
@@ -208,7 +209,7 @@ fn convert_element(element: &Element, output: &mut String) {
 		}
 		"br" => output.push_str("  \n"),
 		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => convert_heading(element, output),
-		"strong" | "b" | "em" | "i" | "s" | "del" => convert_emphasis(element, output),
+		"strong" | "b" | "em" | "i" | "s" | "del" | "strike" => convert_emphasis(element, output),
 		"code" => convert_inline_code(element, output),
 		"q" => convert_quoted(element, output),
 		"pre" => convert_fenced_code(element, output),
@@ -224,6 +225,10 @@ fn convert_element(element: &Element, output: &mut String) {
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
 		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
 		| "html" | "form" | "fieldset" | "center" => convert_block_container(element, output),
+		"span" | "u" | "ins" | "small" | "mark" | "abbr" | "cite" | "time" | "kbd" | "samp"
+		| "var" | "sub" | "sup" | "bdi" | "bdo" | "ruby" | "rt" | "rp" | "wbr" => {
+			convert_children(element, output)
+		}
 		_ => {}
 	}
 }
