@@ -37,7 +37,7 @@ fn append_raw_text(element: &Element, output: &mut String) {
 	}
 }
 
-fn convert_children_to_markdown(element: &Element, output: &mut String) {
+fn convert_children(element: &Element, output: &mut String) {
 	let mut elements = element.children();
 	for node in element.child_nodes() {
 		match node.kind() {
@@ -48,7 +48,7 @@ fn convert_children_to_markdown(element: &Element, output: &mut String) {
 			}
 			Kind::Element => {
 				if let Some(child) = elements.next() {
-					convert_element_to_markdown(&child, output);
+					convert_element(&child, output);
 				}
 			}
 			_ => {}
@@ -73,7 +73,7 @@ fn convert_heading(element: &Element, output: &mut String) {
 		output.push('#');
 	}
 	output.push(' ');
-	convert_children_to_markdown(element, output);
+	convert_children(element, output);
 	output.push_str("\n\n");
 }
 
@@ -93,7 +93,7 @@ fn anchored(inner: &str, open: &str, close: &str) -> String {
 
 fn convert_emphasis(element: &Element, output: &mut String) {
 	let mut inner = String::default();
-	convert_children_to_markdown(element, &mut inner);
+	convert_children(element, &mut inner);
 	let marker = match element.tag_name().as_deref() {
 		Some("strong" | "b") => "**",
 		_ => "*",
@@ -147,16 +147,16 @@ fn convert_image(element: &Element, output: &mut String) {
 fn convert_link(element: &Element, output: &mut String) {
 	if let Some(href) = element.attr("abs:href") {
 		output.push('[');
-		convert_children_to_markdown(element, output);
+		convert_children(element, output);
 		let _ = write!(output, "]({href})");
 	} else {
-		convert_children_to_markdown(element, output);
+		convert_children(element, output);
 	}
 }
 
 fn convert_block_container(element: &Element, output: &mut String) {
 	break_before_block(output);
-	convert_children_to_markdown(element, output);
+	convert_children(element, output);
 	if !output.ends_with('\n') {
 		output.push('\n');
 	}
@@ -164,21 +164,19 @@ fn convert_block_container(element: &Element, output: &mut String) {
 
 fn convert_quoted(element: &Element, output: &mut String) {
 	let mut inner = String::default();
-	convert_children_to_markdown(element, &mut inner);
+	convert_children(element, &mut inner);
 	output.push_str(&anchored(&inner, "\u{201C}", "\u{201D}"));
 }
 
 // Elements come from the WHATWG HTML index,
-// https://html.spec.whatwg.org/multipage/indices.html#elements-3 ; the obsolete
-// ones that still carry prose come from
-// https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features .
-// A tag outside both lists is dropped with its content.
-fn convert_element_to_markdown(element: &Element, output: &mut String) {
+// https://html.spec.whatwg.org/multipage/indices.html#elements-3 ; a tag outside
+// that list is dropped with its content.
+fn convert_element(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
 		"p" | "figcaption" | "dt" | "dd" | "summary" => {
 			break_before_block(output);
-			convert_children_to_markdown(element, output);
+			convert_children(element, output);
 			output.push_str("\n\n");
 		}
 		"br" => output.push_str("  \n"),
@@ -193,22 +191,21 @@ fn convert_element_to_markdown(element: &Element, output: &mut String) {
 			break_before_block(output);
 			output.push_str("---\n\n")
 		}
-		"ul" | "ol" | "menu" => convert_list_to_markdown(element, &tag, output),
-		"blockquote" => convert_blockquote_to_markdown(element, output),
+		"ul" | "ol" | "menu" => convert_list(element, &tag, output),
+		"blockquote" => convert_blockquote(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
 		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
-		| "html" | "form" | "fieldset" | "center" | "dir" => convert_block_container(element, output),
+		| "html" | "form" | "fieldset" => convert_block_container(element, output),
 		"span" | "li" | "sup" | "sub" | "ruby" | "rt" | "rp" | "small" | "mark" | "abbr"
 		| "cite" | "time" | "kbd" | "samp" | "var" | "ins" | "bdi" | "bdo" | "label" | "table"
 		| "thead" | "tbody" | "tfoot" | "tr" | "td" | "th" | "caption" | "colgroup" | "col"
 		| "wbr" | "picture" | "dfn" | "data" | "output" | "legend" | "slot" | "meter"
-		| "progress" | "u" | "s" | "del" | "font" | "big" | "tt" | "strike" | "nobr"
-		| "acronym" | "rb" | "rtc" => convert_children_to_markdown(element, output),
+		| "progress" | "u" | "s" | "del" => convert_children(element, output),
 		_ => {}
 	}
 }
 
-fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
+fn convert_list(element: &Element, tag: &str, output: &mut String) {
 	break_before_block(output);
 	let ordered = tag == "ol";
 	let items: Vec<_> = element
@@ -217,7 +214,7 @@ fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
 		.collect();
 	for (index, item) in items.iter().enumerate() {
 		let mut body = String::default();
-		convert_children_to_markdown(item, &mut body);
+		convert_children(item, &mut body);
 		let mut marker = String::default();
 		if ordered {
 			let _ = write!(marker, "{}. ", index + 1);
@@ -243,10 +240,10 @@ fn convert_list_to_markdown(element: &Element, tag: &str, output: &mut String) {
 	output.push('\n');
 }
 
-fn convert_blockquote_to_markdown(element: &Element, output: &mut String) {
+fn convert_blockquote(element: &Element, output: &mut String) {
 	break_before_block(output);
 	let mut quoted = String::default();
-	convert_children_to_markdown(element, &mut quoted);
+	convert_children(element, &mut quoted);
 	for (index, line) in quoted.trim_end().lines().enumerate() {
 		if index > 0 {
 			output.push('\n');
@@ -265,7 +262,7 @@ fn html_to_markdown(input: &str) -> String {
 
 	let mut output = String::default();
 	if let Some(root) = doc.select_first("#md-root") {
-		convert_children_to_markdown(&root, &mut output);
+		convert_children(&root, &mut output);
 	}
 	output
 }
