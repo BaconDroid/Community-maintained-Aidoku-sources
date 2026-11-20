@@ -408,7 +408,7 @@ pub fn to_markdown(input: &str) -> String {
 	let text = if settings::hide_watermark() {
 		blocks(&text)
 			.iter()
-			.map(|block| watermark::clean(block))
+			.map(|block| watermark::strip(block))
 			.filter(|block| !block.is_empty())
 			.collect::<Vec<String>>()
 			.join("\n\n")

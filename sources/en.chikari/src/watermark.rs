@@ -479,7 +479,7 @@ fn clean_line(line: &str) -> Option<String> {
 	(!parts.is_empty()).then(|| parts.join(" "))
 }
 
-/// Cleans one block: the credits and the noise go, the prose stays.
-pub(crate) fn clean(block: &str) -> String {
+/// Takes one block, not a document: the caller already split the text.
+pub(crate) fn strip(block: &str) -> String {
 	append_block(&strip_injected(block))
 }
