@@ -148,7 +148,10 @@ fn convert_fenced_code(element: &Element, output: &mut String) {
 }
 
 fn convert_image(element: &Element, output: &mut String) {
-	let Some(src) = element.attr("abs:src") else {
+	let Some(src) = element
+		.attr("abs:src")
+		.filter(|src| src.starts_with("http"))
+	else {
 		return;
 	};
 	break_before_block(output);
@@ -220,7 +223,7 @@ fn convert_element(element: &Element, output: &mut String) {
 		"blockquote" => convert_blockquote(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
 		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
-		| "html" | "form" | "fieldset" => convert_block_container(element, output),
+		| "html" | "form" | "fieldset" | "center" => convert_block_container(element, output),
 		_ => {}
 	}
 }
