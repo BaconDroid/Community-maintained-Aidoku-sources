@@ -3,14 +3,12 @@ use aidoku::{
 	imports::defaults::defaults_get,
 };
 
+use crate::helpers::{CONTENT_RATINGS, STATUS, TYPES};
+
 const HIDDEN_GENRES_KEY: &str = "hiddenGenres";
 const TYPES_KEY: &str = "types";
 const STATUS_KEY: &str = "status";
 const CONTENT_RATING_KEY: &str = "contentRating";
-
-const KNOWN_TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"];
-const KNOWN_CONTENT_RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
-const KNOWN_STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled", "upcoming"];
 
 pub fn hidden_genres() -> Vec<String> {
 	defaults_get::<Vec<String>>(HIDDEN_GENRES_KEY).unwrap_or_default()
@@ -21,7 +19,7 @@ pub fn type_filters() -> Vec<&'static str> {
 		defaults_get::<Vec<String>>(TYPES_KEY)
 			.as_deref()
 			.unwrap_or_default(),
-		KNOWN_TYPES,
+		TYPES,
 	)
 }
 
@@ -30,7 +28,7 @@ pub fn status_filter() -> Vec<&'static str> {
 		defaults_get::<Vec<String>>(STATUS_KEY)
 			.as_deref()
 			.unwrap_or_default(),
-		KNOWN_STATUS,
+		STATUS,
 	)
 }
 
@@ -39,7 +37,7 @@ pub fn content_rating_filter() -> Vec<&'static str> {
 		defaults_get::<Vec<String>>(CONTENT_RATING_KEY)
 			.as_deref()
 			.unwrap_or_default(),
-		KNOWN_CONTENT_RATINGS,
+		CONTENT_RATINGS,
 	)
 }
 

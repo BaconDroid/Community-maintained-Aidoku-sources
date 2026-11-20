@@ -22,12 +22,12 @@ pub enum ContentType {
 pub const SERIES_KEY_PREFIX: &str = "series:";
 
 // The API hides novels unless a type is given, so every request sends all of them.
-const TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"];
+pub(crate) const TYPES: &[&str] = &["manga", "manhwa", "manhua", "oel", "novel"];
 
 // The API hides erotica and pornographic tiers unless requested, so browse sends every tier.
-const CONTENT_RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
+pub(crate) const CONTENT_RATINGS: &[&str] = &["safe", "suggestive", "erotica", "pornographic"];
 
-const STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled", "upcoming"];
+pub(crate) const STATUS: &[&str] = &["releasing", "completed", "hiatus", "cancelled", "upcoming"];
 
 const ALLOWED_HOSTS: &[&str] = &["chikari.moe", "www.chikari.moe"];
 const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
