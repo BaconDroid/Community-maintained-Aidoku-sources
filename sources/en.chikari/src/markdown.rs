@@ -194,12 +194,14 @@ fn convert_element(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
 		"p" | "figcaption" | "dt" | "dd" | "summary" => {
-			break_before_block(output);
-			let length = output.len();
-			convert_children(element, output);
-			if output.len() > length {
-				output.push_str("\n\n");
+			let mut inner = String::default();
+			convert_children(element, &mut inner);
+			if inner.trim().is_empty() {
+				return;
 			}
+			break_before_block(output);
+			output.push_str(&inner);
+			output.push_str("\n\n");
 		}
 		"br" => output.push_str("  \n"),
 		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => convert_heading(element, output),
