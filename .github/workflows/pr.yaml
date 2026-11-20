@@ -166,6 +166,68 @@ jobs:
             exit 1
           fi
 
+  cargo-test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Get changed files
+        id: files
+        uses: Ana06/get-changed-files@v2.3.0
+        with:
+          format: json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache rust stuff
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            sources/**/target
+            templates/**/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - uses: ./.github/actions/install-aidoku-cli
+
+      - name: Run tests
+        env:
+          CHANGED_FILES: ${{ steps.files.outputs.added_modified }}
+        run: |
+          set -uo pipefail
+
+          failed=0
+          readarray -t crates < <(
+            jq -r '.[]' <<< "$CHANGED_FILES" |
+              cut -d/ -f1-2 |
+              sort -u |
+              grep -E '^(sources|templates)/' || true
+          )
+
+          for crate in "${crates[@]}"; do
+            [[ -f "$crate/Cargo.toml" ]] || continue
+
+            echo "::group::Testing $crate"
+
+            if ! (
+              cd "$crate"
+              cargo test
+            ); then
+              failed=1
+              echo "::error file=$crate/Cargo.toml,title=Rust tests::cargo test failed in $crate."
+            fi
+
+            echo "::endgroup::"
+          done
+
+          exit $failed
+
   json-format:
     name: JSON formatting
     runs-on: ubuntu-latest
