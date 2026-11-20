@@ -96,6 +96,7 @@ fn convert_emphasis(element: &Element, output: &mut String) {
 	convert_children(element, &mut inner);
 	let marker = match element.tag_name().as_deref() {
 		Some("strong" | "b") => "**",
+		Some("s" | "del") => "~~",
 		_ => "*",
 	};
 	output.push_str(&anchored(&inner, marker, marker));
@@ -168,9 +169,11 @@ fn convert_quoted(element: &Element, output: &mut String) {
 	output.push_str(&anchored(&inner, "\u{201C}", "\u{201D}"));
 }
 
-// Elements come from the WHATWG HTML index,
-// https://html.spec.whatwg.org/multipage/indices.html#elements-3 ; a tag outside
-// that list is dropped with its content.
+// The elements below each have a markdown form, listed against the WHATWG
+// index at https://html.spec.whatwg.org/multipage/indices.html#elements-3 .
+// A block container keeps its line breaks, an element that holds no prose is
+// dropped, and any other tag keeps its children so an unknown wrapper never
+// costs a word.
 fn convert_element(element: &Element, output: &mut String) {
 	let tag = element.tag_name().unwrap_or_default();
 	match tag.as_str() {
@@ -181,7 +184,7 @@ fn convert_element(element: &Element, output: &mut String) {
 		}
 		"br" => output.push_str("  \n"),
 		"h1" | "h2" | "h3" | "h4" | "h5" | "h6" => convert_heading(element, output),
-		"strong" | "b" | "em" | "i" => convert_emphasis(element, output),
+		"strong" | "b" | "em" | "i" | "s" | "del" => convert_emphasis(element, output),
 		"code" => convert_inline_code(element, output),
 		"q" => convert_quoted(element, output),
 		"pre" => convert_fenced_code(element, output),
@@ -192,16 +195,16 @@ fn convert_element(element: &Element, output: &mut String) {
 			output.push_str("---\n\n")
 		}
 		"ul" | "ol" | "menu" => convert_list(element, &tag, output),
+		"table" => convert_table(element, output),
 		"blockquote" => convert_blockquote(element, output),
 		"div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "figure"
 		| "hgroup" | "details" | "dl" | "address" | "nav" | "dialog" | "search" | "body"
 		| "html" | "form" | "fieldset" => convert_block_container(element, output),
-		"span" | "li" | "sup" | "sub" | "ruby" | "rt" | "rp" | "small" | "mark" | "abbr"
-		| "cite" | "time" | "kbd" | "samp" | "var" | "ins" | "bdi" | "bdo" | "label" | "table"
-		| "thead" | "tbody" | "tfoot" | "tr" | "td" | "th" | "caption" | "colgroup" | "col"
-		| "wbr" | "picture" | "dfn" | "data" | "output" | "legend" | "slot" | "meter"
-		| "progress" | "u" | "s" | "del" => convert_children(element, output),
-		_ => {}
+		"script" | "style" | "template" | "noscript" | "iframe" | "svg" | "math" | "object"
+		| "embed" | "video" | "audio" | "source" | "track" | "canvas" | "map" | "area"
+		| "input" | "select" | "option" | "optgroup" | "textarea" | "button" | "datalist"
+		| "selectedcontent" | "head" | "meta" | "link" | "base" | "title" | "colgroup" | "col" => {}
+		_ => convert_children(element, output),
 	}
 }
 
@@ -238,6 +241,53 @@ fn convert_list(element: &Element, tag: &str, output: &mut String) {
 		output.push('\n');
 	}
 	output.push('\n');
+}
+
+fn convert_table(element: &Element, output: &mut String) {
+	break_before_block(output);
+	let mut rows: Vec<Vec<String>> = Vec::new();
+	table_rows(element, &mut rows);
+	let width = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+	if width == 0 {
+		return;
+	}
+	for (index, row) in rows.iter().enumerate() {
+		output.push('|');
+		for column in 0..width {
+			output.push(' ');
+			output.push_str(row.get(column).map_or("", String::as_str));
+			output.push_str(" |");
+		}
+		output.push('\n');
+		if index == 0 {
+			output.push('|');
+			for _ in 0..width {
+				output.push_str(" --- |");
+			}
+			output.push('\n');
+		}
+	}
+	output.push('\n');
+}
+
+fn table_rows(element: &Element, rows: &mut Vec<Vec<String>>) {
+	for child in element.children() {
+		match child.tag_name().as_deref() {
+			Some("thead" | "tbody" | "tfoot") => table_rows(&child, rows),
+			Some("tr") => {
+				let mut row: Vec<String> = Vec::new();
+				for cell in child.children() {
+					if matches!(cell.tag_name().as_deref(), Some("td" | "th")) {
+						let mut text = String::default();
+						convert_children(&cell, &mut text);
+						row.push(text.replace('\n', " ").replace('|', "\\|").trim().into());
+					}
+				}
+				rows.push(row);
+			}
+			_ => {}
+		}
+	}
 }
 
 fn convert_blockquote(element: &Element, output: &mut String) {
