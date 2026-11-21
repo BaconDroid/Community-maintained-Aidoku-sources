@@ -302,7 +302,7 @@ fn without_single_foreign_token(line: &str) -> Option<String> {
 			}
 		}
 		let core = core.trim();
-		if core.chars().any(|ch| ch.is_alphanumeric()) {
+		if holds_word(core) {
 			let mut kept = String::from(line[..start].trim_end());
 			if !kept.is_empty() {
 				kept.push(' ');
@@ -485,10 +485,6 @@ fn tail_after_last_noisy_token(line: &str, from: usize) -> Option<String> {
 
 /// True when the sentence carries a domain-shaped token.
 fn has_domain(sentence: &str) -> bool {
-	has_domain_tail(sentence)
-}
-
-fn has_domain_tail(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
@@ -514,6 +510,11 @@ fn tail_len(chars: &[char], dot: usize) -> usize {
 }
 
 /// A domain label may carry a hyphen, so the token run includes it.
+/// True when the text still holds a letter or a digit worth keeping.
+fn holds_word(text: &str) -> bool {
+	text.chars().any(|ch| ch.is_alphanumeric())
+}
+
 fn is_word_char(ch: char) -> bool {
 	(ch.is_alphanumeric() || ch == '-') && is_prose_char(ch)
 }
@@ -521,7 +522,7 @@ fn is_word_char(ch: char) -> bool {
 fn clean_credit_sentence(text: &str) -> Option<String> {
 	let index = text.find(|ch| !is_prose_char(ch))?;
 	if let Some(cleaned) = without_single_foreign_token(text)
-		&& cleaned.chars().any(|ch| ch.is_alphanumeric())
+		&& holds_word(&cleaned)
 	{
 		return Some(cleaned);
 	}
@@ -554,7 +555,7 @@ fn clean_line(line: &str) -> Option<String> {
 			// marks: drop the marks, keep the words, and keep the sentence.
 			let kept: String = sentence.chars().filter(|ch| is_prose_char(*ch)).collect();
 			let kept = kept.trim();
-			if kept.chars().any(|ch| ch.is_alphanumeric()) {
+			if holds_word(kept) {
 				parts.push(kept.into());
 			}
 		}
