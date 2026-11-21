@@ -24,6 +24,24 @@ const PAIRS: &[(char, char)] = &[
 
 const SPELLED_MIN_LETTERS: usize = 5;
 
+const QUOTES: &[char] = &[
+	'"', '\'', '\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}', '\u{AB}', '\u{BB}', '\u{2039}',
+	'\u{203A}',
+];
+
+fn is_quote(ch: char) -> bool {
+	QUOTES.contains(&ch)
+}
+
+/// The closing character a quote expects: an ASCII quote closes on itself,
+/// every other quote takes its counterpart from `PAIRS`.
+fn quote_close(open: char) -> Option<char> {
+	match open {
+		'"' | '\'' => Some(open),
+		_ => pair_close(open),
+	}
+}
+
 const SENTENCE_ENDS: &[char] = &[
 	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
 ];
@@ -112,29 +130,29 @@ fn strip_injected(markdown: &str) -> String {
 		for _ in 0..marks {
 			output.pop();
 		}
-		let end = span + marks;
-		let at_line_start = output.is_empty() || output.ends_with('\n');
-		index = if text.get(end) == Some(&' ') && (at_line_start || output.ends_with(' ')) {
-			end + 1
-		} else {
-			end
-		};
+		let mut after = 0;
+		while text.get(span + marks + after) == Some(&' ') {
+			after += 1;
+		}
+		let trailing = output.chars().rev().take_while(|ch| *ch == ' ').count();
+		let gap = trailing + after;
+		// Snap the gap around an injection down to its nearest bound: one space,
+		// then steps of four, so indentation and alignment keep their rung.
+		let bound = if gap < 4 { 1 } else { gap / 4 * 4 };
+		while output.ends_with(' ') {
+			output.pop();
+		}
+		if text
+			.get(span + marks + after)
+			.is_some_and(|ch| !ch.is_whitespace())
+		{
+			for _ in 0..bound {
+				output.push(' ');
+			}
+		}
+		index = span + marks + after;
 	}
 	output
-}
-
-fn unbalanced(text: &str) -> Vec<char> {
-	let mut stack: Vec<char> = Vec::new();
-	for ch in text.chars() {
-		if pair_close(ch).is_some() {
-			stack.push(ch);
-		} else if let Some(open) = matching_opener(ch)
-			&& stack.last() == Some(&open)
-		{
-			stack.pop();
-		}
-	}
-	stack
 }
 
 fn sentences(text: &str) -> Vec<String> {
@@ -210,10 +228,6 @@ fn without_dead_pairs(line: &str) -> String {
 			index += 1;
 			continue;
 		}
-		if blank && text.get(end + 1) == Some(&'(') {
-			index += 1;
-			continue;
-		}
 		if foreign {
 			let inner: String = text[index + 1..end].iter().collect();
 			let mut kept_sentences: Vec<String> = Vec::new();
@@ -240,24 +254,6 @@ fn without_dead_pairs(line: &str) -> String {
 	text.into_iter().collect()
 }
 
-fn last_phrase_end(text: &str) -> Option<usize> {
-	let mut found = None;
-	for (index, ch) in text.char_indices() {
-		if !SENTENCE_ENDS.contains(&ch) {
-			continue;
-		}
-		let after = index + ch.len_utf8();
-		if text[after..]
-			.chars()
-			.next()
-			.is_none_or(|next| next.is_whitespace())
-		{
-			found = Some(after);
-		}
-	}
-	found
-}
-
 fn without_single_foreign_token(line: &str) -> Option<String> {
 	let mut hit: Option<(usize, usize)> = None;
 	let mut word = None;
@@ -278,6 +274,48 @@ fn without_single_foreign_token(line: &str) -> Option<String> {
 		return None;
 	}
 	let (start, end) = hit?;
+	// Symbols around a word are decoration and can go; a look-alike letter is
+	// the credit's signature, and the whole token goes with it.
+	let token = &line[start..end];
+	let noisy_letters = token
+		.chars()
+		.any(|ch| !is_prose_char(ch) && ch.is_alphanumeric());
+	if !noisy_letters {
+		// A mark that sat between two letters becomes a space, so the words it
+		// separated stay two words.
+		let mut core = String::default();
+		let chars: Vec<char> = token.chars().collect();
+		for (index, ch) in chars.iter().enumerate() {
+			if is_prose_char(*ch) {
+				core.push(*ch);
+				continue;
+			}
+			let before = index
+				.checked_sub(1)
+				.and_then(|at| chars.get(at))
+				.is_some_and(|prev| prev.is_alphanumeric());
+			let after = chars
+				.get(index + 1)
+				.is_some_and(|next| next.is_alphanumeric());
+			if before && after {
+				core.push(' ');
+			}
+		}
+		let core = core.trim();
+		if core.chars().any(|ch| ch.is_alphanumeric()) {
+			let mut kept = String::from(line[..start].trim_end());
+			if !kept.is_empty() {
+				kept.push(' ');
+			}
+			kept.push_str(core);
+			let rest = line[end..].trim_start();
+			if !rest.is_empty() {
+				kept.push(' ');
+				kept.push_str(rest);
+			}
+			return Some(kept);
+		}
+	}
 	let mut cleaned = String::from(line[..start].trim_end());
 	let rest = line[end..].trim_start();
 	if !cleaned.is_empty() && !rest.is_empty() {
@@ -298,7 +336,43 @@ fn note_foreign(hit: &mut Option<(usize, usize)>, line: &str, start: usize, end:
 	true
 }
 
+/// A quote may front the marks of a dialogue line: it is set aside so the marks
+/// are still read as the opener, then put back in front of the result.
 fn dialogue_line(line: &str) -> String {
+	let lead_end = line
+		.char_indices()
+		.take_while(|(_, ch)| is_leading_mark(*ch) || is_quote(*ch) || *ch == ' ')
+		.map(|(index, ch)| index + ch.len_utf8())
+		.last()
+		.unwrap_or(0);
+	let lead = &line[..lead_end];
+	if !lead.chars().any(is_quote) || !lead.chars().any(is_leading_mark) {
+		return dialogue_marks(line);
+	}
+	let rest = &line[lead_end..];
+	let opener = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
+	let closes = line
+		.trim_end()
+		.chars()
+		.next_back()
+		.is_some_and(|ch| quote_close(opener) == Some(ch));
+	// The closing marker names the family to keep, and it has to be the
+	// counterpart of the opener: a half-quoted line is not a quotation.
+	if !closes {
+		let mut out = String::from("\u{2014}");
+		if lead.ends_with(' ') {
+			out.push(' ');
+		}
+		out.push_str(rest);
+		return out;
+	}
+	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
+	let mut out = String::from(quote);
+	out.push_str(rest);
+	out
+}
+
+fn dialogue_marks(line: &str) -> String {
 	let mut mark_end = 0;
 	for (index, ch) in line.char_indices() {
 		if !is_leading_mark(ch) {
@@ -409,6 +483,41 @@ fn tail_after_last_noisy_token(line: &str, from: usize) -> Option<String> {
 	None
 }
 
+/// True when the sentence carries a domain-shaped token.
+fn has_domain(sentence: &str) -> bool {
+	has_domain_tail(sentence)
+}
+
+fn has_domain_tail(sentence: &str) -> bool {
+	let chars: Vec<char> = sentence.chars().collect();
+	(0..chars.len()).any(|at| {
+		chars[at] == '.'
+			&& at > 0 && is_word_char(chars[at - 1])
+			&& (2..=3).contains(&tail_len(&chars, at))
+	})
+}
+
+/// How many lowercase letters sit right after the dot at `dot`, capped at 4 so
+/// a long word is not mistaken for a domain tail.
+fn tail_len(chars: &[char], dot: usize) -> usize {
+	let mut len = 0;
+	for ch in chars.iter().skip(dot + 1) {
+		if !ch.is_ascii_lowercase() {
+			break;
+		}
+		len += 1;
+		if len > 4 {
+			break;
+		}
+	}
+	len
+}
+
+/// A domain label may carry a hyphen, so the token run includes it.
+fn is_word_char(ch: char) -> bool {
+	(ch.is_alphanumeric() || ch == '-') && is_prose_char(ch)
+}
+
 fn clean_credit_sentence(text: &str) -> Option<String> {
 	let index = text.find(|ch| !is_prose_char(ch))?;
 	if let Some(cleaned) = without_single_foreign_token(text)
@@ -416,64 +525,38 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 	{
 		return Some(cleaned);
 	}
-	let head = &text[..index];
-	let Some(end) = last_phrase_end(head) else {
-		return tail_after_last_noisy_token(text, index);
-	};
-	let mut fixed = String::from(&head[..end]);
-	if let Some(tail) = tail_after_last_noisy_token(text, index) {
-		fixed.push(' ');
-		fixed.push_str(&tail);
-	}
-	for opener in unbalanced(&fixed).into_iter().rev() {
-		let Some(close) = pair_close(opener) else {
-			break;
-		};
-		fixed.push(close);
-	}
-	Some(fixed)
-}
-
-fn append_block(block: &str) -> String {
-	let mut kept: Vec<String> = Vec::new();
-	for raw_line in block.trim().lines() {
-		let (head, core, tail) = peel_emphasis(raw_line);
-		if let Some(line) = clean_line(core) {
-			kept.push([head, line.as_str(), tail].concat());
-		}
-	}
-	kept.join("\n").trim_end().into()
-}
-
-/// A line may open and close on the emphasis markers the converter wrote; the
-/// markers are set aside so the walls they hide are read as walls.
-fn peel_emphasis(line: &str) -> (&str, &str, &str) {
-	let open = line.len() - line.trim_start_matches('*').len();
-	let close = line.len() - line.trim_end_matches('*').len();
-	if open == 0 || close == 0 || open + close >= line.len() {
-		return ("", line, "");
-	}
-	let (head, rest) = line.split_at(open);
-	let (core, tail) = rest.split_at(rest.len() - close);
-	(head, core, tail)
+	// The sentence opens on marks, so keep whatever follows the last of them.
+	tail_after_last_noisy_token(text, index)
 }
 
 fn clean_line(line: &str) -> Option<String> {
-	let cleaned = without_dead_pairs(line);
-	let dialogue = dialogue_line(&cleaned);
-	let line = dialogue.as_str();
+	let dialogue = dialogue_line(line);
+	let cleaned = without_dead_pairs(&dialogue);
+	let line = cleaned.as_str();
 	if line.trim().is_empty() {
 		return None;
 	}
-	if line.find(|ch| !is_prose_char(ch)).is_none() {
+	if line.find(|ch| !is_prose_char(ch)).is_none() && !has_domain(line) {
 		return Some(line.into());
 	}
 	let mut parts: Vec<String> = Vec::new();
 	for sentence in sentences(line) {
+		let sentence = sentence.trim();
+		if has_domain(sentence) {
+			continue;
+		}
 		if sentence.find(|ch| !is_prose_char(ch)).is_none() {
-			parts.push(sentence.trim().into());
-		} else if let Some(cleaned) = clean_credit_sentence(&sentence) {
+			parts.push(sentence.into());
+		} else if let Some(cleaned) = clean_credit_sentence(sentence) {
 			parts.push(cleaned);
+		} else {
+			// A sentence the credit patterns do not recognise is prose wearing
+			// marks: drop the marks, keep the words, and keep the sentence.
+			let kept: String = sentence.chars().filter(|ch| is_prose_char(*ch)).collect();
+			let kept = kept.trim();
+			if kept.chars().any(|ch| ch.is_alphanumeric()) {
+				parts.push(kept.into());
+			}
 		}
 	}
 	(!parts.is_empty()).then(|| parts.join(" "))
@@ -481,5 +564,11 @@ fn clean_line(line: &str) -> Option<String> {
 
 /// Takes one block, not a document: the caller already split the text.
 pub(crate) fn strip(block: &str) -> String {
-	append_block(&strip_injected(block))
+	let mut kept: Vec<String> = Vec::new();
+	for line in block.trim().lines() {
+		if let Some(cleaned) = clean_line(&strip_injected(line)) {
+			kept.push(cleaned);
+		}
+	}
+	kept.join("\n").trim_end().into()
 }
