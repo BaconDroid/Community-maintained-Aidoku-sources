@@ -128,30 +128,24 @@ qu'un signe s'y trouvait. 18 lignes perdues sur 8 656, dont deux de vrai dialogu
 **Écarté** : retirer les guillemets de `PAIRS`. Mesuré 13 chapitres, +50 / -5 mots,
 mais `quote_close` ne sait alors plus apparier, et un fermant reste orphelin.
 
-### 4. La garde anticipée - `clean_line`
-
-Si la ligne n'a **aucun** caractère hors prose **et aucun** domaine, elle est rendue
-telle quelle. Sur un échantillon de 20 chapitres, **1 970 lignes** s'arrêtent ici.
-
-### 5. Le découpage en phrases - `sentences`
-
+### 4. Le découpage en phrases - `sentences`
 Coupe sur `. ! ? ...` et les variantes doubles, avale les fermants accolés, **exige un
 blanc** après. `Lv. 7 > Lv. 8` donne trois phrases ; `word.word` n'en donne qu'une.
 
-### 6. La décision, phrase par phrase
-
+### 5. La décision, phrase par phrase
 | Ordre | Test | Action | Exemple réel |
 |:-:|:--|:--|:--|
-| 6a | domaine (un point, un caractère de mot avant, 2 ou 3 minuscules après) | supprime la phrase | `The source of this cntent is frewebnovel.com.` |
-| 6b | prose pure | garde | `This is to make it cohesive.` |
-| 6c | un crédit d'un seul tenant | voir ci-dessous | - |
-| 6d | repli | garde les caractères de prose, s'il reste un mot | `{1} Explanation:  is Jeoksangari, ...` |
-| 6e | rien de lisible | supprime | `.`, `*` |
+| 5a | domaine (un point, un caractère de mot avant, 2 ou 3 minuscules après) | supprime la phrase | `The source of this cntent is frewebnovel.com.` |
+| 5b | prose pure | garde | `This is to make it cohesive.` |
+| 5c | un crédit d'un seul tenant | voir ci-dessous | - |
+| 5d | repli | garde les caractères de prose, s'il reste un mot | `{1} Explanation:  is Jeoksangari, ...` |
+| 5e | rien de lisible | supprime | `.`, `*` |
 
-**6c** : pour chaque mot, retirer les signes ; une suite de signes entre deux lettres
-devient **une espace** ; jeter le mot s'il porte encore une lettre étrangère ; garder
-le reste.
-
+**5c** : d'abord, retirer le crochet qui touche un jeton porteur d'une lettre étrangère,
+avant comme après, collé ou non. Puis, pour chaque mot, retirer les signes ; une suite
+de signes entre deux lettres devient **une espace** ; jeter le mot s'il porte encore une
+lettre étrangère ; garder le reste. Le crochet part parce que ses mots sont de la prose :
+sans cette étape, le passage mot par mot les garderait et laisserait `(Exclusive on)`.
 | Entrée réelle | Sortie |
 |:--|:--|
 | `... traces of \ \ her past through the Thieves' Guild?` | phrase entière |
@@ -161,14 +155,13 @@ le reste.
 Les crochets CJK U+300A / U+300B du corpus servent de **séparateurs de mots** : les
 transformer en espace est le comportement correct.
 
-**6d** reste utile : quand tous les mots sont étrangers, 6c ne rend rien et 6d sauve
-les lettres de prose (`Fųck` > `Fck`). Mesuré : 6d intervient sur **8 phrases sur
-102**, contre 46 avant la règle 6c actuelle.
+**5d** reste utile : quand **tous** les mots portent une lettre étrangère, 5c ne rend
+rien et 5d sauve les caractères de prose (`Fųck` seul donne `Fck`). Sur les 97 chapitres
+du corpus, retirer 5d ne change **aucun** chapitre ; la règle ne se déclenche donc pas
+ici, mais elle est la seule à récupérer ce cas.
 
-### 7. Le recollage
-
+### 6. Le recollage
 Phrases par une espace, lignes par `\n`, fin rognée.
-
 ## Les listes
 
 | Liste | Contenu | Sert à |
@@ -257,17 +250,16 @@ ne touche rien.
 | Crédit laissé | 3 chapitres gardent des caractères hors prose, dont un crédit entier |
 | Réparation contre-productive | l'étape 3 réinsère le texte que l'étape 2 venait de couper, dès que la coupe tombe dans une réplique |
 
-### Nos sept règles, bénéfice et compromis
+### Nos six règles, bénéfice et compromis
 
 | Règle | Bénéfice mesuré | Compromis mesuré |
 |:--|:--|:--|
-| 1. Crédit épelé | retire le crédit au milieu d'une phrase **sans perdre la phrase** | les signes accolés partent avec, d'où `(Exclusive on)` laissé |
+| 1. Crédit épelé | retire le crédit au milieu d'une phrase **sans perdre la phrase** | les signes accolés partent avec |
 | 2. Marqueur de dialogue | garde la réplique et son guillemet | un tiret de tête devient un cadratin |
 | 3. Paires mortes | supprime les blocs de crédit entre crochets, garde les répliques citées | une paire en prose pure reste |
-| 4. Garde anticipée | coût nul sur les lignes déjà propres | aucune |
-| 5. Phrases | décide par phrase, pas par ligne | `Lv. 7` compte pour une phrase |
-| 6. Décision | 202 mots retirés là où upstream en retire 1 514 | la note de traducteur de `city-of-witches` 25 sort tronquée |
-| 7. Recollage | un paragraphe reste un paragraphe | aucune |
+| 4. Phrases | décide par phrase, pas par ligne | `Lv. 7` compte pour une phrase ; avec/sans sur le corpus : 0 différence |
+| 5. Décision | 216 mots retirés là où upstream en retire 1 514 ; les références de site du milieu partent | la note de traducteur de `city-of-witches` 25 sort tronquée |
+| 6. Recollage | un paragraphe reste un paragraphe | aucune |
 
 ### Où chacun gagne
 
@@ -275,8 +267,77 @@ ne touche rien.
 |:--|:--|:--|
 | Crédit au milieu d'une phrase, aucun point avant lui | **nous** | upstream jette la ligne entière |
 | Crédit dans une réplique citée | **nous** | la réparation d'upstream réinsère le crédit |
-| Crédit fait de prose pure, seul dans son paragraphe | **upstream** | nous gardons le nom, lui jette le paragraphe |
-| Note de traducteur | **upstream** | nous la tronquons en son milieu, il la garde ou la jette entière |
+| Crédit fait de prose pure, seul dans son paragraphe | **upstream**, une fois | `Edited by: faker` reste chez nous ; c'est le seul cas du corpus |
+| Titre de chapitre seul dans son paragraphe | **nous** | upstream supprime les 22 titres du corpus, nous les gardons |
+| Note de traducteur | **upstream**, une fois | une note sur 15 sort tronquée chez nous, et cette troncature est acceptée |
+
+### Mesure : retirer la parenthèse qui suit un crédit
+
+Idée mesurée : après un crédit, la parenthèse accolée ne dit rien de plus, et c'est
+elle qui laisse `(Exclusive on)` en sortie.
+
+| Règle testée | Portée | Résultat |
+|:--|:--|:--|
+| parenthèse après un crédit **épelé** (règle 1) | 97 chapitres | **0 occurrence** : ce crédit ne porte jamais de parenthèse ici |
+| parenthèse après un jeton **portant une lettre étrangère** (règle 5c) | 97 chapitres | **5 retraits**, 4 formes, **-14 mots**, 0 faux positif |
+
+Ce que la seconde retire, exhaustivement :
+
+| Forme | Occurrences | Chapitre |
+|:--|--:|:--|
+| `(Exclusive on Nvlght)` | 1 | taming 43 |
+| `(Only on Nvlgt)` | 1 | taming 51 |
+| `(Original source)` | 1 | taming 44 |
+| `(Read the full story)` | 2 | taming 46, 49 |
+
+Le faux positif à craindre est un texte du récit qui cite un caractère d'un autre
+script entre parenthèses. Le corpus en contient un : `the runic letter '(...)'`, où la
+parenthèse **contient** le caractère au lieu de le **suivre**. La règle ne le touche
+pas, parce qu'elle exige que le jeton étranger précède la parenthèse.
+
+Le crochet **avant** le jeton et le crochet **collé**, sans espace, sont dans la règle
+retenue. Mesurés, ils n'ajoutent aucun cas sur ce corpus : les cinq retraits sont les
+mêmes et la sortie est identique au caractère près sur les 97 chapitres. Ils sont là
+comme sûreté, pas comme gain.
+
+La règle lit `PAIRS`, mais **jamais un guillemet** : `bracket_close` refuse toute
+ouverture qui figure dans `QUOTES`, exactement comme la règle des paires mortes. Sans
+cette garde, un jeton étranger suivi d'une réplique citée aurait emporté la réplique
+entière. Le corpus n'a pas ce cas, la garde est donc gratuite ici et protège là où il
+apparaîtrait.
+
+### Mesure : la règle de forme, sans vocabulaire
+
+Objectif : retirer un crédit fait de prose pure, seul dans son paragraphe, sans liste
+de vocabulaire. Forme essayée : un bloc de quatre mots au plus, sans chiffre, sans
+ponctuation de fin de phrase, contenant un deux-points.
+
+| Variante | Blocs retirés | Crédits | Fiches de statut | Répliques | Titres de section |
+|:--|--:|--:|--:|--:|--:|
+| forme large | 49 | 21 | 10 | 4 | 14 |
+| forme étroite, sans deux-points final | 35 | 21 | 10 | 4 | 0 |
+
+Les positifs, tous réels :
+
+| Bloc | Où |
+|:--|:--|
+| `Edited by: faker` | taming 41, 42, 44, 45, 47, 49, 50, 51, et quatre chapitres novelbuddy |
+| `E/N:[Insert Giga Chad]` | city-of-witches 22, et un chapitre novelbuddy |
+
+Les négatifs, tous réels :
+
+| Bloc | Ce que c'est | Où |
+|:--|:--|:--|
+| `"Name: Nephis"` | une réplique | shadow-slave 24, et un chapitre novelbuddy |
+| `"True Name: Changing Star"` | une réplique | shadow-slave 24, et un chapitre novelbuddy |
+| `Talents: Farsight Calm Thinking` | une fiche de statut, donc du récit | taming 47, 48 |
+| `Meanwhile, the instructor continued:` | une ligne de narration | shadow-slave 23 |
+
+`"Name: Nephis"` et `Edited by: faker` ont exactement la même forme : quatre mots au
+plus, un deux-points, aucun chiffre, aucun point final. Aucune règle de forme ne les
+sépare sans lire les mots, donc sans vocabulaire. Les deux variantes jettent 14 blocs
+de récit, dix fiches et quatre répliques, pour 21 crédits, et la variante étroite jette
+en plus les titres de section. Verdict : écartée.
 
 ### Exemples réels
 
@@ -303,7 +364,7 @@ Upstream coupe bien après `tweaked.`, puis son étape 3 voit le guillemet ouver
 réinsère tout jusqu'au guillemet fermant : le crédit revient. Nous retirons le crédit
 et laissons `(Exclusive on)`, qui est de la prose.
 
-**C. Crédit écrit comme un nom** (`city-of-witches` ch. 22)
+**C. Titre de chapitre, seul dans son paragraphe** (`city-of-witches` ch. 22)
 
 | | |
 |:--|:--|
@@ -311,8 +372,11 @@ et laissons `(Exclusive on)`, qui est de la prose.
 | notre | `Amelia Merigold (1)` |
 | upstream | **paragraphe supprimé** |
 
-Ici upstream a raison sur le fond : c'est le crédit du traducteur. Nous gardons le nom
-parce qu'il est en prose pure, c'est le prix de la règle << pas de vocabulaire >>.
+Le label du chapitre est `Chapter 22: Amelia Merigold (1)` : ce paragraphe est le
+titre, pas un crédit. Upstream le supprime parce que les marques décoratives sont
+hors prose ; nous le gardons. Les 22 paragraphes de cette forme dans le corpus sont
+tous des titres, donc l'avantage supposé d'upstream sur le crédit en prose pure
+n'existe pas ici.
 
 **D. Note de traducteur** (`city-of-witches` ch. 25)
 
@@ -337,9 +401,10 @@ les chapitres sans crédit, où les deux implémentations ne changent rien.
 | Cas | Comportement | Statut |
 |:--|:--|:--|
 | Crédit entièrement en prose (`Nvlght`, `frewebnovel.com`) | laissé | accepté, aucune règle de vocabulaire |
-| Crédit écrit comme un nom (`Amelia Merigold (1)`) | laissé | accepté, upstream jette le paragraphe, nous gardons le nom |
-| Trois débris entre parenthèses (`(Exclusive on)`, `(Read the full story)`, `(Don't copy, read here)`) | laissés | accepté, prix de la récupération des répliques |
-| Note de traducteur commençant par une phrase retirée | sort tronquée (`city-of-witches` 25) | **défaut connu**, la décision se prend par phrase |
+| Titre de chapitre seul dans son paragraphe (`Amelia Merigold (1)`) | conservé | correct : c'est le titre, upstream le supprime |
+| Notes d'auteur et de traducteur (`Edited by: faker`, `T/N`, `E/N:`) | laissées | accepté : ce ne sont pas des références de site, elles peuvent partir sans dommage |
+| Référence de site ou de groupe au milieu du texte (`(Exclusive on)`, `(Only on)`, `(Original source)`, `(Read the full story)`) | **retirée** par la règle 5c | résolu, voir la mesure plus bas |
+| Note de traducteur commençant par une phrase retirée | sort tronquée (`city-of-witches` 25) | accepté, la note n'est pas du récit |
 | Phrase portant un domaine | supprimée entière | accepté |
 | Crochets mélangés mal formés `([dead) useful]` | laissés intacts | accepté |
 
@@ -352,10 +417,12 @@ les chapitres sans crédit, où les deux implémentations ne changent rien.
 | Guillemets hors de `PAIRS` | 13 chapitres, +50 / -5 | écarté, casse l'appariement |
 | Retirer les guillemets mal appariés | 20 lignes concernées | écarté, ponctuation légitime |
 | Passe intérieure explicite pour les crochets | 0 chapitre | appliqué quand même, plus juste |
-| Logique des parenthèses pour la règle 6 | 29 chapitres, **-202 mots** | écarté, jette les phrases et les fiches |
+| Logique des parenthèses pour la règle 5 | 29 chapitres, **-202 mots** | écarté, jette les phrases et les fiches |
 | Parentèse courte jetée (option 2) | 46 chapitres, **-146 mots** | écarté, jette `(gambas)`, `(1)`, les incises |
 | Crédits nettoyés avant les guillemets | 0 chapitre | neutre, ordre actuel conservé |
 | Guillemets corrigés en dernier | 29 chapitres, **-86 mots** | écarté |
+| Règle de forme sur un bloc court avec deux-points | 35 à 49 blocs, dont 14 de récit | écarté, ne sépare pas `"Name: Nephis"` de `Edited by: faker` |
+| Crochet avant et crochet collé, en plus de l'après | 0 cas de plus, sortie identique | **appliqué** comme sûreté, pas comme gain |
 
 ## Points ouverts
 

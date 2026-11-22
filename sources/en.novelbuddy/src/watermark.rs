@@ -412,8 +412,7 @@ fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
-			&& at > 0
-			&& is_word_char(chars[at - 1])
+			&& at > 0 && is_word_char(chars[at - 1])
 			&& matches!(tail_len(&chars, at), 2 | 3)
 	})
 }
@@ -439,10 +438,95 @@ fn is_word_char(ch: char) -> bool {
 	(ch.is_alphanumeric() || ch == '-') && is_prose_char(ch)
 }
 
+/// The closer of a bracket, never of a quote: a quoted line is speech to keep,
+/// and the dead-pair rule reads the same distinction from the same list.
+fn bracket_close(open: char) -> Option<char> {
+	if is_quote(open) {
+		return None;
+	}
+	pair_close(open)
+}
+fn matching_pair_index(
+	chars: &[char],
+	indices: impl Iterator<Item = usize>,
+	first: char,
+	second: char,
+) -> Option<usize> {
+	let mut depth = 0usize;
+	for index in indices {
+		if chars[index] == first {
+			depth += 1;
+		} else if chars[index] == second {
+			depth = depth.saturating_sub(1);
+			if depth == 0 {
+				return Some(index);
+			}
+		}
+	}
+	None
+}
+/// The bracket group that touches a token holding a letter from another script:
+/// after it, before it, or glued to it. A credit often names itself again in
+/// that bracket, and the words there are prose, so the word-by-word pass would
+/// keep them and leave a fragment behind.
+fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
+	let mut at = 0;
+	while at < chars.len() {
+		if chars[at].is_whitespace() {
+			at += 1;
+			continue;
+		}
+		let start = at;
+		while at < chars.len() && !chars[at].is_whitespace() {
+			at += 1;
+		}
+		if !chars[start..at].iter().copied().any(is_foreign) {
+			continue;
+		}
+		let mut probe = at;
+		while probe < chars.len() && (chars[probe].is_whitespace() || is_sign(chars[probe])) {
+			probe += 1;
+		}
+		if let Some(open) = chars.get(probe).copied()
+			&& let Some(close) = bracket_close(open)
+			&& let Some(end) = matching_pair_index(chars, probe.., open, close)
+		{
+			return Some((probe, end + 1));
+		}
+		let mut back = start;
+		while back > 0 && (chars[back - 1].is_whitespace() || is_sign(chars[back - 1])) {
+			back -= 1;
+		}
+		if back == 0 || is_quote(chars[back - 1]) {
+			continue;
+		}
+		let closer = chars[back - 1];
+		let Some(open) = matching_opener(closer) else {
+			continue;
+		};
+		if let Some(start) = matching_pair_index(chars, (0..back).rev(), closer, open) {
+			return Some((start, back));
+		}
+	}
+	None
+}
+
+fn without_credit_bracket(text: &str) -> String {
+	let mut chars: Vec<char> = text.chars().collect();
+	while let Some((start, end)) = touching_bracket(&chars) {
+		chars.drain(start..end);
+	}
+	chars.into_iter().collect()
+}
+
 fn clean_credit_sentence(text: &str) -> Option<String> {
 	// A sign is decoration: it goes and the word stays. A run of signs between
 	// two letters becomes one space, so the words it separated stay two words.
 	// A letter from another script is the credit's own spelling: the word goes.
+	// A credit often names itself again in a bracket right after its own
+	// spelling. The words there are prose, so they have to go before the
+	// word-by-word pass decides to keep them.
+	let text = without_credit_bracket(text);
 	let mut kept: Vec<String> = Vec::new();
 	for word in text.split_whitespace() {
 		let chars: Vec<char> = word.chars().collect();
@@ -481,9 +565,6 @@ fn clean_line(line: &str) -> Option<String> {
 	let line = cleaned.as_str();
 	if line.trim().is_empty() {
 		return None;
-	}
-	if line.find(|ch| !is_prose_char(ch)).is_none() && !has_domain(line) {
-		return Some(line.into());
 	}
 	let mut parts: Vec<String> = Vec::new();
 	for sentence in sentences(line) {
