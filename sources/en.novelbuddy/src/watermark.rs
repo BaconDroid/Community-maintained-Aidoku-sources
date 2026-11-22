@@ -251,9 +251,8 @@ fn without_dead_pairs(line: &str) -> String {
 				pairs.push((open, at));
 			}
 		}
-		// Last opened first, so the innermost pair is decided before the one
-		// that holds it.
-		pairs.reverse();
+		// A pair is recorded when its closer is reached, so the list already runs
+		// from the innermost pair outwards, which is the order they are decided in.
 		let mut changed = false;
 		for (open, close_at) in pairs {
 			let content = &text[open + 1..close_at];
@@ -320,11 +319,9 @@ fn dialogue_line(line: &str) -> String {
 	}
 	let rest = &line[lead_end..];
 	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
-	let closes = line
-		.trim_end()
-		.chars()
-		.next_back()
-		.is_some_and(|ch| quote_close(quote) == Some(ch));
+	// The closer need not be the last character: a line may close its speech
+	// and keep talking.
+	let closes = quote_close(quote).is_some_and(|close| rest.contains(close));
 	// The closing marker names the family to keep, and it has to be the
 	// counterpart of the opener: a half-quoted line is not a quotation.
 	if !closes {
@@ -337,11 +334,19 @@ fn dialogue_line(line: &str) -> String {
 			out.push_str(rest);
 			return out;
 		}
+		// The closer answered the quote we just threw away, so it would hang.
+		let kept = rest.trim_end();
+		let kept = match kept.chars().next_back() {
+			Some(ch) if !is_quote(ch) && matching_opener(ch).is_some() => {
+				&kept[..kept.len() - ch.len_utf8()]
+			}
+			_ => kept,
+		};
 		let mut out = String::from("\u{2014}");
 		if lead.ends_with(' ') {
 			out.push(' ');
 		}
-		out.push_str(rest);
+		out.push_str(kept);
 		return out;
 	}
 	let mut out = String::from(quote);
