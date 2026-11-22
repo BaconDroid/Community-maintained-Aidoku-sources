@@ -424,13 +424,8 @@ fn tail_len(chars: &[char], dot: usize) -> usize {
 		.iter()
 		.skip(dot + 1)
 		.take_while(|ch| ch.is_ascii_lowercase())
-		.take(5)
+		.take(4)
 		.count()
-}
-
-/// True when the text still holds a letter or a digit worth keeping.
-fn holds_word(text: &str) -> bool {
-	text.chars().any(|ch| ch.is_alphanumeric())
 }
 
 /// A domain label may carry a hyphen, so the token run includes it.
@@ -511,14 +506,6 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 	None
 }
 
-fn without_credit_bracket(text: &str) -> String {
-	let mut chars: Vec<char> = text.chars().collect();
-	while let Some((start, end)) = touching_bracket(&chars) {
-		chars.drain(start..end);
-	}
-	chars.into_iter().collect()
-}
-
 fn clean_credit_sentence(text: &str) -> Option<String> {
 	// A sign is decoration: it goes and the word stays. A run of signs between
 	// two letters becomes one space, so the words it separated stay two words.
@@ -526,7 +513,16 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 	// A credit often names itself again in a bracket right after its own
 	// spelling. The words there are prose, so they have to go before the
 	// word-by-word pass decides to keep them.
-	let text = without_credit_bracket(text);
+	let mut text: Vec<char> = text.chars().collect();
+	while let Some((start, end)) = touching_bracket(&text) {
+		text.drain(start..end);
+	}
+	let text: String = text.into_iter().collect();
+	let words: Vec<&str> = text.split_whitespace().collect();
+	let internal_dot = words.iter().enumerate().any(|(index, word)| {
+		let dots = word.chars().filter(|ch| *ch == '.').count();
+		word.contains('.') && !(index + 1 == words.len() && word.ends_with('.') && dots == 1)
+	});
 	let mut kept: Vec<String> = Vec::new();
 	for word in text.split_whitespace() {
 		let chars: Vec<char> = word.chars().collect();
@@ -551,7 +547,17 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 				clean.push(' ');
 			}
 		}
-		if clean.is_empty() || clean.chars().any(is_foreign) {
+		if clean.is_empty() {
+			continue;
+		}
+		if clean.chars().any(is_foreign) {
+			let foreign_count = clean.chars().filter(|ch| is_foreign(*ch)).count();
+			if foreign_count == 1 && !internal_dot {
+				let prose: String = clean.chars().filter(|ch| is_prose_char(*ch)).collect();
+				if !prose.is_empty() {
+					kept.push(prose);
+				}
+			}
 			continue;
 		}
 		kept.push(clean);
@@ -576,14 +582,6 @@ fn clean_line(line: &str) -> Option<String> {
 			parts.push(sentence.into());
 		} else if let Some(cleaned) = clean_credit_sentence(sentence) {
 			parts.push(cleaned);
-		} else {
-			// A sentence the credit patterns do not recognise is prose wearing
-			// marks: drop the marks, keep the words, and keep the sentence.
-			let kept: String = sentence.chars().filter(|ch| is_prose_char(*ch)).collect();
-			let kept = kept.trim();
-			if holds_word(kept) {
-				parts.push(kept.into());
-			}
 		}
 	}
 	(!parts.is_empty()).then(|| parts.join(" "))

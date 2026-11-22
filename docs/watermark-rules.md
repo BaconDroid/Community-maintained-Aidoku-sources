@@ -15,7 +15,7 @@ ont tranché chaque choix. Les chiffres viennent d'un corpus de 127 chapitres :
 | Copie | `sources/en.novelbuddy/src/watermark.rs`, **identique octet pour octet** |
 | Idem pour | `markdown.rs` et `mtl.rs` |
 | Appelé par | `markdown.rs`, une fois **par paragraphe**, si le réglage `hide_watermark` est actif |
-| Taille | 519 lignes |
+| Taille | 599 lignes |
 
 Toute modification se fait dans une copie puis se recopie dans l'autre. Vérifier
 après : `md5sum` des deux doit être égal.
@@ -47,121 +47,156 @@ que son test est << ni alphanumérique, ni blanc >>.
 
 ## Les règles, dans l'ordre
 
+La chaîne actuelle comporte six étapes. Elle vise d'abord les références de site ou de
+groupe qui apparaissent **au milieu du récit**. Les notes d'auteur (`Edited by`, `E/N`)
+et les notes de traducteur (`T/N`) n'ont pas de statut protégé : elles peuvent rester,
+être tronquées ou partir si une règle utile les touche aussi.
+
+Une règle ne reste pas uniquement parce qu'elle supprime une note. Elle doit soit
+retirer une référence de site ou de groupe, soit protéger du récit lisible, soit
+réparer une structure nécessaire au nettoyage. Une suppression qui ne produit qu'un
+gain sur `Edited by`, `T/N` ou `E/N` est un coût sans bénéfice et doit être retirée.
+
 ### 1. Le crédit épelé - `strip_injected`
 
 **Détection** : une lettre, puis une alternance séparateur + lettre, **5 lettres
-minimum**, en partant d'une frontière de mot.
+minimum**, en partant d'une frontière de mot. Les guillemets ne sont pas traités comme
+des crochets : ils sont de la parole à garder.
 
-**Retrait des marques** : de chaque côté, **indépendamment**. On saute les espaces
-collés à l'injection, puis on consomme la suite de caractères ni alphanumériques ni
-blancs, et on s'arrête.
+**Notre résultat** (`taming-the-villainesses`, chapitre 42) :
 
-**Recollage** : l'espace laissé est ramené à 1, ou au multiple de 4 inférieur, pour
-que l'indentation garde son cran.
+```text
+I was wondering what to °* N  v  l i g h t *° do if she ran away.
+-> I was wondering what to do if she ran away.
+```
 
-| Entrée réelle | Sortie |
-|:--|:--|
-| `"I /N_o_v_e_l_i_g_h_t/ heard there is a village nearby."` | `"I heard there is a village nearby."` |
-| `Someone then smacked me {N*o*v*e*l*i*g*h*t} on the back.` | `Someone then smacked me on the back.` |
-| `I was wondering what to °* N v l i g h t *° do if she ran away.` | `I was wondering what to do if she ran away.` |
+**Upstream** : la ligne n'a aucun point avant le crédit, donc elle est supprimée en
+entier. La phrase réelle disparaît avec le crédit.
 
-**Écarté** : passer le seuil à 4 lettres. Mesuré 0 chapitre de différence, et cela
-retirerait un vrai sigle écrit avec séparateurs (`N.A.S.A.`).
-
-**Écarté** : consommer jusqu'au premier alphanumérique, blancs compris. Mesuré 3
-chapitres et **mange de la ponctuation** : `little,` > `little`, `that.` > `that`,
-`workers'` > `workers`.
+Les marques sont retirées de chaque côté indépendamment. L'espace restant est ramené
+à 1, ou au multiple de 4 inférieur pour conserver l'indentation. Le seuil de 5 lettres
+reste important : le seuil à 4 ne changeait aucun chapitre et risquait de prendre des
+sigles comme `N.A.S.A.`.
 
 ### 2. Le marqueur de dialogue - `dialogue_line`
 
 Le **lead** est la suite de tête faite de signes, de guillemets et d'espaces.
 
-| Cas | Action |
-|:--|:--|
-| le lead n'a pas à la fois un guillemet et un signe | `dialogue_marks` |
-| le lead a les deux, et un fermant apparaît après le lead | on garde l'ouvrant |
-| le lead a les deux, et aucun fermant n'apparaît | cadratin, et le fermant de paire orphelin part |
+| Cas | Notre comportement | Upstream |
+|:--|:--|:--|
+| lead avec guillemet et signe, fermant trouvé après | garde l'ouvrant et la réplique | coupe selon la ligne et peut réinsérer le crédit avec le fermant |
+| lead sans fermant répondant | cadratin, fermant de paire orphelin retiré | aucune règle équivalente |
+| fermant de famille différente | conservé | dépend de sa réparation générique |
 
-`dialogue_marks` : si la ligne finit par un signe, `wrapped_text` garde l'intérieur ;
-sinon la suite de signes de tête devient un cadratin.
-
-Le remplacement est **U+2014**, jamais `-` ASCII : en markdown, un `-` en début de
-ligne crée une puce. Un tiret déjà présent n'est jamais touché, parce que `-`, `-` et
-`-` sont dans les blocs de prose.
-
-| Entrée réelle | Sortie |
-|:--|:--|
-| `\u{0F3A}\u{0F3A} Amelia Merigold (1) \u{0F3B}` | `Amelia Merigold (1)` |
-| `"-Hello," she said.` (ferme au milieu) | `"Hello," she said.` |
-
-**Décidé** : ne pas retirer un fermant mal apparié. 20 lignes du corpus ouvrent et
-ferment sur des guillemets de familles différentes, et le fermant est chaque fois
-légitime.
+Le remplacement est U+2014, jamais `-` ASCII : un tiret ASCII en tête de ligne peut
+créer une puce Markdown. La règle a changé 20 lignes du corpus dans les mesures de
+régression précédentes.
 
 ### 3. Les paires mortes - `without_dead_pairs`
 
-**Les guillemets sont exclus** : une réplique citée est de la parole à garder, pas un
-crochet à couper. `PAIRS` les garde pour `quote_close` et `matching_opener`, qui en
-ont besoin pour apparier.
+Les guillemets sont exclus des suppressions. `PAIRS` reste la liste complète pour
+l'appariement, mais les règles qui suppriment ou cherchent un groupe passent par la
+version **PAIRS moins QUOTES**. Ainsi une réplique ne devient jamais un crochet de
+crédit.
 
-Pour les crochets, une pile apparie chaque ouvrante à sa fermante, types mélangés
-compris, puis les paires sont décidées **de l'intérieur vers l'extérieur**.
+Pour les crochets, une pile apparie les types mélangés, puis les paires sont décidées
+de l'intérieur vers l'extérieur.
 
-| Contenu | Action |
-|:--|:--|
-| blanc | la paire part |
-| hors prose, avec des phrases lisibles | on garde les phrases dont aucun mot n'est bruité |
-| hors prose, aucune phrase lisible | la paire et son contenu partent |
-| tout en prose | la paire reste |
+| Contenu du groupe | Notre comportement | Upstream |
+|:--|:--|:--|
+| blanc | groupe supprimé | réparation générique |
+| signes + phrases lisibles | phrases propres conservées | coupe la ligne autour du premier bruit |
+| aucun texte lisible | groupe supprimé | ligne supprimée |
+| prose pure | groupe conservé | groupe conservé |
 
-| Entrée réelle | Sortie |
-|:--|:--|
-| `Edited by: faker[T/N: join the dşçöŕd (here) for spoilers, ...]` | `Edited by: faker` |
-| `He said (a [\] c) then left.` | `He said (a c) then left.` |
-
-L'intérieur d'abord change la sortie : juger l'extérieure en premier l'emportait avec
-le crochet intérieur. Mesuré 0 chapitre de différence, mais la forme est meilleure.
-
-**Sans cette exclusion des guillemets** : une réplique entière disparaissait dès
-qu'un signe s'y trouvait. 18 lignes perdues sur 8 656, dont deux de vrai dialogue.
-
-**Écarté** : retirer les guillemets de `PAIRS`. Mesuré 13 chapitres, +50 / -5 mots,
-mais `quote_close` ne sait alors plus apparier, et un fermant reste orphelin.
+La pile est importante pour les paires imbriquées. Retirer les guillemets de `PAIRS`
+semble plus simple, mais casse `quote_close` et laisse des fermants orphelins.
 
 ### 4. Le découpage en phrases - `sentences`
-Coupe sur `. ! ? ...` et les variantes doubles, avale les fermants accolés, **exige un
-blanc** après. `Lv. 7 > Lv. 8` donne trois phrases ; `word.word` n'en donne qu'une.
+
+La règle coupe sur `. ! ? ...` et les variantes doubles, avale les fermants accolés,
+et exige un blanc après. `Lv. 7 > Lv. 8` donne trois phrases ; `word.word` n'en donne
+qu'une.
+
+**Mesure avec et sans cette règle sur les 97 chapitres** : 168 691 mots dans les deux
+cas, sortie identique au caractère près sur les 97 chapitres. Elle reste parce que la
+structure protège le cas où une ligne future porte plusieurs phrases dont une seule
+contient un crédit. Le corpus actuel ne donne aucun exemple de ce bénéfice.
+
+Upstream décide par ligne : dans le chapitre 42 de `taming-the-villainesses`, cela lui
+fait supprimer toute la ligne portant `I was wondering what to ...`, alors que notre
+décision par phrase conserve la phrase nettoyée.
 
 ### 5. La décision, phrase par phrase
-| Ordre | Test | Action | Exemple réel |
+
+| Ordre | Test | Notre action | Cible réelle |
 |:-:|:--|:--|:--|
-| 5a | domaine (un point, un caractère de mot avant, 2 ou 3 minuscules après) | supprime la phrase | `The source of this cntent is frewebnovel.com.` |
-| 5b | prose pure | garde | `This is to make it cohesive.` |
-| 5c | un crédit d'un seul tenant | voir ci-dessous | - |
-| 5d | repli | garde les caractères de prose, s'il reste un mot | `{1} Explanation:  is Jeoksangari, ...` |
-| 5e | rien de lisible | supprime | `.`, `*` |
+| 5a | domaine : point, mot avant, 2 ou 3 minuscules après | phrase supprimée | `frewebnovel.com` au milieu d'une phrase |
+| 5b | prose pure | phrase gardée | récit normal et notes en prose |
+| 5c | crédit d'un seul tenant | nettoyage mot par mot + crochet touchant | références de site ou groupe au milieu |
+| 5d | rien de lisible | phrase supprimée | `.`, `*` et fragments vides |
 
-**5c** : d'abord, retirer le crochet qui touche un jeton porteur d'une lettre étrangère,
-avant comme après, collé ou non. Puis, pour chaque mot, retirer les signes ; une suite
-de signes entre deux lettres devient **une espace** ; jeter le mot s'il porte encore une
-lettre étrangère ; garder le reste. Le crochet part parce que ses mots sont de la prose :
-sans cette étape, le passage mot par mot les garderait et laisserait `(Exclusive on)`.
-| Entrée réelle | Sortie |
-|:--|:--|
-| `... traces of \ \ her past through the Thieves' Guild?` | phrase entière |
-| `talent\u{300A}Farsight\u{300B}being activated` | `talent Farsight being activated` |
-| `Talents: \u{300A}Farsight\u{300B}\u{300A}Calm\u{300B} Thinking` | `Talents: Farsight Calm Thinking` |
+**5a - domaine.** Le domaine est une cible prioritaire : une phrase qui contient un
+site est supprimée entière. Upstream peut aussi supprimer la ligne, mais sa découpe
+peut prendre du récit autour du domaine.
 
-Les crochets CJK U+300A / U+300B du corpus servent de **séparateurs de mots** : les
-transformer en espace est le comportement correct.
+**5b - prose.** Une phrase de récit pure reste toujours. Une note d'auteur ou de
+traducteur en prose peut aussi rester, mais ce n'est pas une garantie à préserver :
+une règle qui retire une référence de site peut retirer la note voisine avec elle.
+Cette branche n'est pas une règle de suppression de notes.
 
-**5d** reste utile : quand **tous** les mots portent une lettre étrangère, 5c ne rend
-rien et 5d sauve les caractères de prose (`Fųck` seul donne `Fck`). Sur les 97 chapitres
-du corpus, retirer 5d ne change **aucun** chapitre ; la règle ne se déclenche donc pas
-ici, mais elle est la seule à récupérer ce cas.
+**5c - crédit et parenthèse adjacente.** D'abord, `bracket_close` lit `PAIRS` mais
+refuse les ouvertures de `QUOTES`. Le groupe qui touche un jeton portant une lettre
+étrangère est retiré avant le passage mot par mot : avant, après, collé ou séparé par
+des signes. Ensuite les signes sont retirés, les signes entre deux lettres deviennent
+une espace, et le mot qui garde une lettre étrangère part.
 
-### 6. Le recollage
-Phrases par une espace, lignes par `\n`, fin rognée.
+Le corpus donne cinq retraits, quatre formes :
+
+| Entrée réelle | Notre sortie | Sortie upstream |
+|:--|:--|:--|
+| `...tweaked. * Nvlght * (Exclusive on Nvlght) For example...` | `...tweaked. (For example...` | le texte revient avec la réparation du guillemet |
+| `...entry, * Nvlgt * (Only on Nvlgt) you'll...` | parenthèse supprimée | crédit conservé |
+| `...ticking time * NvIight * (Original source) bombs...` | parenthèse supprimée | crédit conservé |
+| `...many * Nvlght * (Read the full story) people...` | parenthèse supprimée | crédit conservé |
+
+Les deux occurrences de `(Read the full story)` sont dans les chapitres 46 et 49.
+Les deux extensions avant/collé n'ont ajouté aucun cas sur le corpus, mais elles sont
+conservées comme protection. Une note `T/N`, `E/N` ou `Edited by` peut toutefois être
+touchée si elle porte le même motif étranger adjacent : sa conservation n'est pas une
+contrainte du modèle, mais cette possibilité ne justifie pas à elle seule la règle.
+
+La récupération de prose étrangère fait partie de **5c**. Si un mot ne porte qu'une
+seule lettre étrangère et que la phrase ne contient pas de point interne de domaine,
+les caractères de prose du mot sont conservés : `Fųck, this hurt!` devient
+`Fck, this hurt!`. Cette variante ajoute **2 mots dans 2 chapitres**.
+
+Le seuil `<= 2` a été mesuré : il réintroduit `NvIight` dans `taming` 44, qui est un
+crédit. Une seule lettre étrangère est donc le seuil retenu. Il n'y a plus de 5d séparée.
+
+### 6. Le recollage - `strip`
+
+Les phrases sont recollées par une espace, les lignes par `\n`, et la fin est rognée.
+Le caller de `markdown.rs` recolle ensuite les blocs par une ligne vide.
+
+### Résultat global contre upstream
+
+Sur 97 chapitres et 168 905 mots, après conversion HTML identique et application bloc par
+bloc :
+
+| Mesure | Notre version | Upstream |
+|:--|--:|--:|
+| Mots retirés | **214** | **1 514** |
+| Chapitres modifiés | **58** | **58** |
+| Caractères hors prose restants | **0** | **20** |
+| Lettres étrangères restantes | **0** | **14** |
+| Chapitres encore sales | **0** | **3** |
+
+Upstream retire sept fois plus de mots, principalement parce qu'il supprime des lignes
+entières. Nous retirons moins, mais nous retirons la cible prioritaire : les références
+de site ou de groupe au milieu du texte. Les notes d'auteur et de traducteur ne sont
+pas protégées dans l'une ou l'autre sortie.
+
 ## Les listes
 
 | Liste | Contenu | Sert à |
@@ -201,7 +236,7 @@ crédit.
 ## Comparaison avec l'implémentation upstream
 
 L'upstream (`Aidoku-Community/sources`) fait 200 lignes et 10 fonctions. La nôtre en
-fait 520 et 27. Ce n'est pas la même idée : upstream coupe des lignes, nous décidons
+fait 599 et 31 fonctions. Ce n'est pas la même idée : upstream coupe des lignes, nous décidons
 des phrases.
 
 ### Méthode
@@ -218,8 +253,8 @@ des phrases.
 
 | Mesure | Brut | Notre | Upstream |
 |:--|------:|------:|------:|
-| Mots | 168 905 | 168 703 | 167 391 |
-| Mots retirés | - | **202** | **1 514** |
+| Mots | 168 905 | 168 691 | 167 391 |
+| Mots retirés | - | **214** | **1 514** |
 | Lignes | 18 187 | 18 173 | 17 895 |
 | Chapitres modifiés | - | 58 | 58 |
 | Sorties différentes | - | 49 chapitres | 49 chapitres |
@@ -258,7 +293,7 @@ ne touche rien.
 | 2. Marqueur de dialogue | garde la réplique et son guillemet | un tiret de tête devient un cadratin |
 | 3. Paires mortes | supprime les blocs de crédit entre crochets, garde les répliques citées | une paire en prose pure reste |
 | 4. Phrases | décide par phrase, pas par ligne | `Lv. 7` compte pour une phrase ; avec/sans sur le corpus : 0 différence |
-| 5. Décision | 216 mots retirés là où upstream en retire 1 514 ; les références de site du milieu partent | la note de traducteur de `city-of-witches` 25 sort tronquée |
+| 5. Décision | 214 mots retirés là où upstream en retire 1 514 ; les références de site du milieu partent | la note de traducteur de `city-of-witches` 25 sort tronquée |
 | 6. Recollage | un paragraphe reste un paragraphe | aucune |
 
 ### Où chacun gagne
@@ -267,14 +302,14 @@ ne touche rien.
 |:--|:--|:--|
 | Crédit au milieu d'une phrase, aucun point avant lui | **nous** | upstream jette la ligne entière |
 | Crédit dans une réplique citée | **nous** | la réparation d'upstream réinsère le crédit |
-| Crédit fait de prose pure, seul dans son paragraphe | **upstream**, une fois | `Edited by: faker` reste chez nous ; c'est le seul cas du corpus |
+| Note d'auteur en prose pure | les deux peuvent la garder ou la supprimer | elle n'est pas protégée |
 | Titre de chapitre seul dans son paragraphe | **nous** | upstream supprime les 22 titres du corpus, nous les gardons |
-| Note de traducteur | **upstream**, une fois | une note sur 15 sort tronquée chez nous, et cette troncature est acceptée |
+| Note de traducteur | comportement variable | une note sur 15 sort tronquée chez nous, et cette troncature est acceptable |
 
 ### Mesure : retirer la parenthèse qui suit un crédit
 
 Idée mesurée : après un crédit, la parenthèse accolée ne dit rien de plus, et c'est
-elle qui laisse `(Exclusive on)` en sortie.
+elle qui laissait `(Exclusive on)` en sortie avant le renforcement de 5c.
 
 | Règle testée | Portée | Résultat |
 |:--|:--|:--|
@@ -357,12 +392,12 @@ le crédit et gardons la phrase.
 | | |
 |:--|:--|
 | brut | `"Of course, there are some things that need to be fixed or tweaked. * Nvlght * (Exclusive on Nvlght) For example, the name 'slave' is a bit out of date."` |
-| notre | `"Of course, there are some things that need to be fixed or tweaked. (Exclusive on) For example, the name 'slave' is a bit out of date."` |
+| notre | `"Of course, there are some things that need to be fixed or tweaked. For example, the name 'slave' is a bit out of date."` |
 | upstream | **identique au brut** |
 
 Upstream coupe bien après `tweaked.`, puis son étape 3 voit le guillemet ouvert et
 réinsère tout jusqu'au guillemet fermant : le crédit revient. Nous retirons le crédit
-et laissons `(Exclusive on)`, qui est de la prose.
+et sa parenthèse de site, puis gardons la phrase réelle qui suit.
 
 **C. Titre de chapitre, seul dans son paragraphe** (`city-of-witches` ch. 22)
 
@@ -402,7 +437,7 @@ les chapitres sans crédit, où les deux implémentations ne changent rien.
 |:--|:--|:--|
 | Crédit entièrement en prose (`Nvlght`, `frewebnovel.com`) | laissé | accepté, aucune règle de vocabulaire |
 | Titre de chapitre seul dans son paragraphe (`Amelia Merigold (1)`) | conservé | correct : c'est le titre, upstream le supprime |
-| Notes d'auteur et de traducteur (`Edited by: faker`, `T/N`, `E/N:`) | laissées | accepté : ce ne sont pas des références de site, elles peuvent partir sans dommage |
+| Notes d'auteur et de traducteur (`Edited by: faker`, `T/N`, `E/N:`) | conservées, tronquées ou supprimées selon les autres règles | accepté : elles ne sont pas protégées |
 | Référence de site ou de groupe au milieu du texte (`(Exclusive on)`, `(Only on)`, `(Original source)`, `(Read the full story)`) | **retirée** par la règle 5c | résolu, voir la mesure plus bas |
 | Note de traducteur commençant par une phrase retirée | sort tronquée (`city-of-witches` 25) | accepté, la note n'est pas du récit |
 | Phrase portant un domaine | supprimée entière | accepté |
