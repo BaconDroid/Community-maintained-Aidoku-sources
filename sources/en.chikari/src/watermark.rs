@@ -231,153 +231,82 @@ fn trim_noisy_walls(sentence: &str) -> Vec<&str> {
 
 fn without_dead_pairs(line: &str) -> String {
 	let mut text: Vec<char> = line.chars().collect();
-	let mut index = 0;
-	while index < text.len() {
-		let opener = text[index];
-		// A quoted passage is speech to keep, not a bracket to cut.
-		if is_quote(opener) {
-			index += 1;
-			continue;
-		}
-		let Some(close) = pair_close(opener) else {
-			index += 1;
-			continue;
-		};
-		let mut end = index + 1;
-		let mut depth = 0;
-		while let Some(&ch) = text.get(end) {
-			if ch == close && depth == 0 {
-				break;
-			}
-			if ch == close {
-				depth -= 1;
-			} else if ch == opener {
-				depth += 1;
-			}
-			end += 1;
-		}
-		if text.get(end) != Some(&close) {
-			index += 1;
-			continue;
-		}
-		let content = &text[index + 1..end];
-		let blank = content.iter().all(|ch| ch.is_whitespace());
-		let foreign = content.iter().any(|ch| !is_prose_char(*ch));
-		if !(blank || foreign) {
-			index += 1;
-			continue;
-		}
-		if foreign {
-			let inner: String = text[index + 1..end].iter().collect();
-			let mut kept_sentences: Vec<String> = Vec::new();
-			for sentence in sentences(&inner) {
-				let words = trim_noisy_walls(&sentence);
-				if words.is_empty() || words.iter().any(|word| is_noisy(word)) {
-					continue;
-				}
-				kept_sentences.push(words.join(" "));
-			}
-			if !kept_sentences.is_empty() {
-				text.splice(index + 1..end, kept_sentences.join(" ").chars());
-				index = 0;
+	loop {
+		// Every open pair, matched by a stack so mixed and nested brackets line
+		// up with their own closer.
+		let mut stack: Vec<usize> = Vec::new();
+		let mut pairs: Vec<(usize, usize)> = Vec::new();
+		for (at, ch) in text.iter().enumerate() {
+			if is_quote(*ch) {
 				continue;
 			}
+			if pair_close(*ch).is_some() {
+				stack.push(at);
+				continue;
+			}
+			if let Some(&open) = stack.last()
+				&& pair_close(text[open]) == Some(*ch)
+			{
+				stack.pop();
+				pairs.push((open, at));
+			}
 		}
-		end += 1;
-		if text.get(end) == Some(&' ') && (index == 0 || text[index - 1] == ' ') {
-			end += 1;
+		// Last opened first, so the innermost pair is decided before the one
+		// that holds it.
+		pairs.reverse();
+		let mut changed = false;
+		for (open, close_at) in pairs {
+			let content = &text[open + 1..close_at];
+			let blank = content.iter().all(|ch| ch.is_whitespace());
+			let foreign = content.iter().any(|ch| !is_prose_char(*ch));
+			if !(blank || foreign) {
+				continue;
+			}
+			if foreign {
+				let inner: String = content.iter().collect();
+				let mut kept: Vec<String> = Vec::new();
+				for sentence in sentences(&inner) {
+					let words = trim_noisy_walls(&sentence);
+					if words.is_empty() || words.iter().any(|word| is_noisy(word)) {
+						continue;
+					}
+					kept.push(words.join(" "));
+				}
+				if !kept.is_empty() {
+					text.splice(open + 1..close_at, kept.join(" ").chars());
+					changed = true;
+					break;
+				}
+			}
+			let mut close_end = close_at + 1;
+			if text.get(close_end) == Some(&' ') && (open == 0 || text[open - 1] == ' ') {
+				close_end += 1;
+			}
+			text.drain(open..close_end);
+			changed = true;
+			break;
 		}
-		text.drain(index..end);
-		index = 0;
+		if !changed {
+			break;
+		}
 	}
 	text.into_iter().collect()
 }
 
-/// Joins the parts that carry text, one space between them.
-fn join_words(parts: &[&str]) -> String {
-	let mut out = String::default();
-	for part in parts.iter().filter(|part| !part.is_empty()) {
-		if !out.is_empty() {
-			out.push(' ');
-		}
-		out.push_str(part);
-	}
-	out
-}
-
-fn without_single_foreign_token(line: &str) -> Option<String> {
-	let mut hit: Option<(usize, usize)> = None;
-	let mut word = None;
-	for (index, ch) in line.char_indices() {
-		if ch.is_whitespace() {
-			if let Some(start) = word.take()
-				&& !note_foreign(&mut hit, line, start, index)
-			{
-				return None;
-			}
-		} else if word.is_none() {
-			word = Some(index);
-		}
-	}
-	if let Some(start) = word
-		&& !note_foreign(&mut hit, line, start, line.len())
-	{
-		return None;
-	}
-	let (start, end) = hit?;
-	// Symbols around a word are decoration and can go; a look-alike letter is
-	// the credit's signature, and the whole token goes with it.
-	let token = &line[start..end];
-	let noisy_letters = token.chars().any(is_foreign);
-	if !noisy_letters {
-		// A mark that sat between two letters becomes a space, so the words it
-		// separated stay two words.
-		let mut core = String::default();
-		let chars: Vec<char> = token.chars().collect();
-		for (index, ch) in chars.iter().enumerate() {
-			if is_prose_char(*ch) {
-				core.push(*ch);
-				continue;
-			}
-			let before = index
-				.checked_sub(1)
-				.and_then(|at| chars.get(at))
-				.is_some_and(|prev| prev.is_alphanumeric());
-			let after = chars
-				.get(index + 1)
-				.is_some_and(|next| next.is_alphanumeric());
-			if before && after {
-				core.push(' ');
-			}
-		}
-		let core = core.trim();
-		if holds_word(core) {
-			return Some(join_words(&[
-				line[..start].trim_end(),
-				core,
-				line[end..].trim_start(),
-			]));
-		}
-	}
-	Some(join_words(&[
-		line[..start].trim_end(),
-		line[end..].trim_start(),
-	]))
-}
-
-fn note_foreign(hit: &mut Option<(usize, usize)>, line: &str, start: usize, end: usize) -> bool {
-	if !is_noisy(&line[start..end]) {
-		return true;
-	}
-	if hit.is_some() {
-		return false;
-	}
-	*hit = Some((start, end));
-	true
-}
-
 /// A quote may front the marks of a dialogue line: it is set aside so the marks
 /// are still read as the opener, then put back in front of the result.
+/// The opening quote that expects `close`, and only a quote: a bracket keeps
+/// the em dash, because a bracket is not speech.
+fn quote_open(close: char) -> Option<char> {
+	if !is_quote(close) {
+		return None;
+	}
+	match close {
+		'"' | '\'' => Some(close),
+		_ => matching_opener(close),
+	}
+}
+
 fn dialogue_line(line: &str) -> String {
 	let lead_end = line
 		.char_indices()
@@ -399,6 +328,15 @@ fn dialogue_line(line: &str) -> String {
 	// The closing marker names the family to keep, and it has to be the
 	// counterpart of the opener: a half-quoted line is not a quotation.
 	if !closes {
+		// The line closes on some other quote: keep a quote, the one that expects it.
+		if let Some(open) = line.trim_end().chars().next_back().and_then(quote_open) {
+			let mut out = String::from(open);
+			if lead.ends_with(' ') {
+				out.push(' ');
+			}
+			out.push_str(rest);
+			return out;
+		}
 		let mut out = String::from("\u{2014}");
 		if lead.ends_with(' ') {
 			out.push(' ');
@@ -464,48 +402,6 @@ fn wrapped_text(line: &str, mark_end: usize) -> Option<String> {
 	(!inner.is_empty()).then(|| String::from(inner))
 }
 
-fn tail_after_last_noisy_token(line: &str, from: usize) -> Option<String> {
-	let mut last_end = from;
-	let mut start = None;
-	for (index, ch) in line.char_indices() {
-		if ch.is_whitespace() {
-			if let Some(word) = start.take()
-				&& is_noisy(&line[word..index])
-			{
-				last_end = index;
-			}
-		} else if start.is_none() {
-			start = Some(index);
-		}
-	}
-	if let Some(word) = start
-		&& is_noisy(&line[word..])
-	{
-		last_end = line.len();
-	}
-	let mut word = None;
-	for (index, ch) in line
-		.char_indices()
-		.skip_while(|(index, _)| *index < last_end)
-	{
-		if ch.is_whitespace() {
-			if let Some(start) = word.take()
-				&& line[start..index].starts_with(char::is_uppercase)
-			{
-				return Some(line[start..].trim_end().into());
-			}
-		} else if word.is_none() {
-			word = Some(index);
-		}
-	}
-	if let Some(start) = word
-		&& line[start..].starts_with(char::is_uppercase)
-	{
-		return Some(line[start..].trim_end().into());
-	}
-	None
-}
-
 /// True when the sentence carries a domain-shaped token.
 fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
@@ -538,14 +434,39 @@ fn is_word_char(ch: char) -> bool {
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
-	let index = text.find(|ch| !is_prose_char(ch))?;
-	if let Some(cleaned) = without_single_foreign_token(text)
-		&& holds_word(&cleaned)
-	{
-		return Some(cleaned);
+	// A sign is decoration: it goes and the word stays. A run of signs between
+	// two letters becomes one space, so the words it separated stay two words.
+	// A letter from another script is the credit's own spelling: the word goes.
+	let mut kept: Vec<String> = Vec::new();
+	for word in text.split_whitespace() {
+		let chars: Vec<char> = word.chars().collect();
+		let mut clean = String::default();
+		let mut at = 0;
+		while at < chars.len() {
+			if !is_sign(chars[at]) {
+				clean.push(chars[at]);
+				at += 1;
+				continue;
+			}
+			let from = at;
+			while at < chars.len() && is_sign(chars[at]) {
+				at += 1;
+			}
+			let before = from
+				.checked_sub(1)
+				.and_then(|i| chars.get(i))
+				.is_some_and(|prev| prev.is_alphanumeric());
+			let after = chars.get(at).is_some_and(|next| next.is_alphanumeric());
+			if before && after {
+				clean.push(' ');
+			}
+		}
+		if clean.is_empty() || clean.chars().any(is_foreign) {
+			continue;
+		}
+		kept.push(clean);
 	}
-	// The sentence opens on marks, so keep whatever follows the last of them.
-	tail_after_last_noisy_token(text, index)
+	(!kept.is_empty()).then(|| kept.join(" "))
 }
 
 fn clean_line(line: &str) -> Option<String> {
