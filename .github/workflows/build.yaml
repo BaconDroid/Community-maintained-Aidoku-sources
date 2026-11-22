@@ -34,15 +34,64 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            sources/**/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-registry-1.99.0-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-1.99.0-
+
+      # Every source builds the same dependency graph, so caching each target
+      # directory stored 179 copies of the same artifacts: one 8.4 GB entry
+      # against a 10 GB repository limit, and 222 seconds to restore on every
+      # push. One prepared target directory is cached instead, and each source
+      # receives an ordinary copy of it before packaging.
+      - name: Cache cargo target seed
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aidoku-target-seed
+          key: ${{ runner.os }}-target-seed-1.99.0-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-target-seed-1.99.0-
+
+      - name: Prepare cargo target seed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          seed="$HOME/.cache/aidoku-target-seed"
+          if [[ -d "$seed/wasm32-unknown-unknown/release" ]]; then
+            echo "target seed restored from cache"
+            exit 0
+          fi
+
+          reference=""
+          for source in sources/*; do
+            [[ -f "$source/Cargo.toml" ]] || continue
+            reference="$source"
+            break
+          done
+          test -n "$reference"
+
+          echo "building target seed from $reference"
+          ( cd "$reference" && cargo build --release --target wasm32-unknown-unknown )
+
+          mkdir -p "$seed"
+          cp -a "$reference/target/." "$seed/"
+          rm -rf "$reference/target"
+
+          # aidoku package copies the first wasm it finds in the build directory,
+          # so a wasm left in the seed could be packaged in place of a source's
+          # own binary.
+          find "$seed" -name '*.wasm' -delete
 
       - uses: ./.github/actions/install-aidoku-cli
 
       - name: Build sources
+        shell: bash
         run: |
           set -euo pipefail
+
+          seed="$HOME/.cache/aidoku-target-seed"
+
+          # A source that fails or is skipped must not publish the package a
+          # previous run left behind.
+          rm -f sources/*/package.aix
 
           for source in sources/*; do
             [[ -f "$source/Cargo.toml" ]] || continue
@@ -50,8 +99,12 @@ jobs:
             echo "::group::Packaging $source"
             (
               cd "$source"
+              rm -rf target
+              cp -a "$seed" target
               aidoku package
             )
+            rm -rf "$source/target"
+            test -s "$source/package.aix"
             echo "::endgroup::"
           done
 
