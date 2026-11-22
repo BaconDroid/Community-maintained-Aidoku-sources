@@ -33,8 +33,6 @@ const SENTENCE_ENDS: &[char] = &[
 	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
 ];
 
-/// Prose is the three blocks, and whitespace from anywhere: a gap between two
-/// words is not a mark the credit left.
 fn is_prose_char(ch: char) -> bool {
 	let code = u32::from(ch);
 	ch.is_whitespace()
@@ -49,8 +47,7 @@ fn is_sign(ch: char) -> bool {
 	!is_prose_char(ch) && !ch.is_alphanumeric()
 }
 
-/// A letter or digit from another script, which is what the credit spells
-/// itself with.
+/// A letter from another script, which is what the credit spells itself with.
 fn is_foreign(ch: char) -> bool {
 	!is_prose_char(ch) && ch.is_alphanumeric()
 }
@@ -131,6 +128,24 @@ fn spelled_run(text: &[char], start: usize) -> Option<usize> {
 	(letters >= SPELLED_MIN_LETTERS).then_some(end)
 }
 
+/// The marks a credit left on one side, past the spaces that touch it.
+fn marks(side: impl Iterator<Item = char>) -> usize {
+	let mut count = 0;
+	let mut seen = false;
+	for ch in side {
+		if ch == ' ' && !seen {
+			count += 1;
+			continue;
+		}
+		if ch.is_whitespace() || ch.is_alphanumeric() {
+			break;
+		}
+		seen = true;
+		count += 1;
+	}
+	count
+}
+
 fn strip_injected(markdown: &str) -> String {
 	let text: Vec<char> = markdown.chars().collect();
 	let mut output = String::default();
@@ -141,26 +156,13 @@ fn strip_injected(markdown: &str) -> String {
 			index += 1;
 			continue;
 		};
-		let mut left = 0;
-		for ch in output.chars().rev() {
-			if ch.is_whitespace() || ch.is_alphanumeric() {
-				break;
-			}
-			left += 1;
-		}
-		let mut right = 0;
-		for ch in text[span..].iter() {
-			if ch.is_whitespace() || ch.is_alphanumeric() {
-				break;
-			}
-			right += 1;
-		}
-		let marks = left.min(right);
-		for _ in 0..marks {
+		let left = marks(output.chars().rev());
+		let right = marks(text[span..].iter().copied());
+		for _ in 0..left {
 			output.pop();
 		}
 		let mut after = 0;
-		while text.get(span + marks + after) == Some(&' ') {
+		while text.get(span + right + after) == Some(&' ') {
 			after += 1;
 		}
 		let trailing = output.chars().rev().take_while(|ch| *ch == ' ').count();
@@ -172,14 +174,14 @@ fn strip_injected(markdown: &str) -> String {
 			output.pop();
 		}
 		if text
-			.get(span + marks + after)
+			.get(span + right + after)
 			.is_some_and(|ch| !ch.is_whitespace())
 		{
 			for _ in 0..bound {
 				output.push(' ');
 			}
 		}
-		index = span + marks + after;
+		index = span + right + after;
 	}
 	output
 }
