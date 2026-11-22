@@ -412,7 +412,8 @@ fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
-			&& at > 0 && is_word_char(chars[at - 1])
+			&& at > 0
+			&& is_word_char(chars[at - 1])
 			&& matches!(tail_len(&chars, at), 2 | 3)
 	})
 }
