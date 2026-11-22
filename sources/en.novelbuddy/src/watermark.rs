@@ -29,8 +29,52 @@ const QUOTES: &[char] = &[
 	'\u{203A}',
 ];
 
+const SENTENCE_ENDS: &[char] = &[
+	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
+];
+
+/// Prose is the three blocks, and whitespace from anywhere: a gap between two
+/// words is not a mark the credit left.
+fn is_prose_char(ch: char) -> bool {
+	let code = u32::from(ch);
+	ch.is_whitespace()
+		|| PROSE_BLOCKS
+			.iter()
+			.any(|(start, end)| (*start..=*end).contains(&code))
+}
+
+/// A sign from another script: a bracket, a dash, a bullet. It is not prose,
+/// and it is not a letter either.
+fn is_sign(ch: char) -> bool {
+	!is_prose_char(ch) && !ch.is_alphanumeric()
+}
+
+/// A letter or digit from another script, which is what the credit spells
+/// itself with.
+fn is_foreign(ch: char) -> bool {
+	!is_prose_char(ch) && ch.is_alphanumeric()
+}
+
+/// True when the word carries anything the prose blocks do not hold: a sign or
+/// a letter from another script.
+fn is_noisy(word: &str) -> bool {
+	word.chars().any(|ch| !is_prose_char(ch))
+}
+
+fn is_separator(ch: char) -> bool {
+	!ch.is_alphanumeric() && ch != '\n' && ch != '\r'
+}
+
 fn is_quote(ch: char) -> bool {
 	QUOTES.contains(&ch)
+}
+
+fn pair_close(open: char) -> Option<char> {
+	PAIRS.iter().find(|pair| pair.0 == open).map(|pair| pair.1)
+}
+
+fn matching_opener(close: char) -> Option<char> {
+	PAIRS.iter().find(|pair| pair.1 == close).map(|pair| pair.0)
 }
 
 /// The closing character a quote expects: an ASCII quote closes on itself,
@@ -42,36 +86,21 @@ fn quote_close(open: char) -> Option<char> {
 	}
 }
 
-const SENTENCE_ENDS: &[char] = &[
-	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
-];
-
-fn is_prose_char(ch: char) -> bool {
-	let code = u32::from(ch);
-	ch.is_whitespace()
-		|| PROSE_BLOCKS
-			.iter()
-			.any(|(start, end)| (*start..=*end).contains(&code))
+/// How many bytes the leading run of signs takes.
+fn sign_run(text: &str) -> usize {
+	text.char_indices()
+		.take_while(|(_, ch)| is_sign(*ch))
+		.map(|(index, ch)| index + ch.len_utf8())
+		.last()
+		.unwrap_or(0)
 }
 
-fn is_leading_mark(ch: char) -> bool {
-	!is_prose_char(ch) && !ch.is_alphanumeric()
-}
-
-fn is_noisy(word: &str) -> bool {
-	word.chars().any(|ch| !is_prose_char(ch))
-}
-
-fn is_separator(ch: char) -> bool {
-	!ch.is_alphanumeric() && ch != '\n' && ch != '\r'
-}
-
-fn pair_close(open: char) -> Option<char> {
-	PAIRS.iter().find(|pair| pair.0 == open).map(|pair| pair.1)
-}
-
-fn matching_opener(close: char) -> Option<char> {
-	PAIRS.iter().find(|pair| pair.1 == close).map(|pair| pair.0)
+/// Where the trailing run of signs starts.
+fn trailing_sign_start(text: &str) -> usize {
+	text.char_indices()
+		.rev()
+		.find(|(_, ch)| !is_sign(*ch))
+		.map_or(0, |(index, ch)| index + ch.len_utf8())
 }
 
 fn spelled_run(text: &[char], start: usize) -> Option<usize> {
@@ -254,6 +283,18 @@ fn without_dead_pairs(line: &str) -> String {
 	text.into_iter().collect()
 }
 
+/// Joins the parts that carry text, one space between them.
+fn join_words(parts: &[&str]) -> String {
+	let mut out = String::default();
+	for part in parts.iter().filter(|part| !part.is_empty()) {
+		if !out.is_empty() {
+			out.push(' ');
+		}
+		out.push_str(part);
+	}
+	out
+}
+
 fn without_single_foreign_token(line: &str) -> Option<String> {
 	let mut hit: Option<(usize, usize)> = None;
 	let mut word = None;
@@ -277,9 +318,7 @@ fn without_single_foreign_token(line: &str) -> Option<String> {
 	// Symbols around a word are decoration and can go; a look-alike letter is
 	// the credit's signature, and the whole token goes with it.
 	let token = &line[start..end];
-	let noisy_letters = token
-		.chars()
-		.any(|ch| !is_prose_char(ch) && ch.is_alphanumeric());
+	let noisy_letters = token.chars().any(is_foreign);
 	if !noisy_letters {
 		// A mark that sat between two letters becomes a space, so the words it
 		// separated stay two words.
@@ -303,26 +342,17 @@ fn without_single_foreign_token(line: &str) -> Option<String> {
 		}
 		let core = core.trim();
 		if holds_word(core) {
-			let mut kept = String::from(line[..start].trim_end());
-			if !kept.is_empty() {
-				kept.push(' ');
-			}
-			kept.push_str(core);
-			let rest = line[end..].trim_start();
-			if !rest.is_empty() {
-				kept.push(' ');
-				kept.push_str(rest);
-			}
-			return Some(kept);
+			return Some(join_words(&[
+				line[..start].trim_end(),
+				core,
+				line[end..].trim_start(),
+			]));
 		}
 	}
-	let mut cleaned = String::from(line[..start].trim_end());
-	let rest = line[end..].trim_start();
-	if !cleaned.is_empty() && !rest.is_empty() {
-		cleaned.push(' ');
-	}
-	cleaned.push_str(rest);
-	Some(cleaned)
+	Some(join_words(&[
+		line[..start].trim_end(),
+		line[end..].trim_start(),
+	]))
 }
 
 fn note_foreign(hit: &mut Option<(usize, usize)>, line: &str, start: usize, end: usize) -> bool {
@@ -341,21 +371,21 @@ fn note_foreign(hit: &mut Option<(usize, usize)>, line: &str, start: usize, end:
 fn dialogue_line(line: &str) -> String {
 	let lead_end = line
 		.char_indices()
-		.take_while(|(_, ch)| is_leading_mark(*ch) || is_quote(*ch) || *ch == ' ')
+		.take_while(|(_, ch)| is_sign(*ch) || is_quote(*ch) || *ch == ' ')
 		.map(|(index, ch)| index + ch.len_utf8())
 		.last()
 		.unwrap_or(0);
 	let lead = &line[..lead_end];
-	if !lead.chars().any(is_quote) || !lead.chars().any(is_leading_mark) {
+	if !lead.chars().any(is_quote) || !lead.chars().any(is_sign) {
 		return dialogue_marks(line);
 	}
 	let rest = &line[lead_end..];
-	let opener = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
+	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
 	let closes = line
 		.trim_end()
 		.chars()
 		.next_back()
-		.is_some_and(|ch| quote_close(opener) == Some(ch));
+		.is_some_and(|ch| quote_close(quote) == Some(ch));
 	// The closing marker names the family to keep, and it has to be the
 	// counterpart of the opener: a half-quoted line is not a quotation.
 	if !closes {
@@ -366,20 +396,13 @@ fn dialogue_line(line: &str) -> String {
 		out.push_str(rest);
 		return out;
 	}
-	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
 	let mut out = String::from(quote);
 	out.push_str(rest);
 	out
 }
 
 fn dialogue_marks(line: &str) -> String {
-	let mut mark_end = 0;
-	for (index, ch) in line.char_indices() {
-		if !is_leading_mark(ch) {
-			break;
-		}
-		mark_end = index + ch.len_utf8();
-	}
+	let mark_end = sign_run(line);
 	if mark_end == 0 {
 		return line.into();
 	}
@@ -391,13 +414,7 @@ fn dialogue_marks(line: &str) -> String {
 		let rest = &line[start..];
 		let trimmed = rest.trim_start();
 		let spaces = rest.len() - trimmed.len();
-		let mut end = 0;
-		for (index, ch) in trimmed.char_indices() {
-			if !is_leading_mark(ch) {
-				break;
-			}
-			end = index + ch.len_utf8();
-		}
+		let end = sign_run(trimmed);
 		if end == 0 {
 			start += spaces;
 			break;
@@ -426,14 +443,10 @@ fn dialogue_marks(line: &str) -> String {
 fn wrapped_text(line: &str, mark_end: usize) -> Option<String> {
 	let trimmed = line.trim_end();
 	let last = trimmed.chars().next_back()?;
-	if !is_leading_mark(last) {
+	if !is_sign(last) {
 		return None;
 	}
-	let close_start = trimmed
-		.char_indices()
-		.rev()
-		.find(|(_, ch)| !is_leading_mark(*ch))
-		.map_or(0, |(index, ch)| index + ch.len_utf8());
+	let close_start = trailing_sign_start(trimmed);
 	if close_start <= mark_end {
 		return None;
 	}
@@ -489,32 +502,27 @@ fn has_domain(sentence: &str) -> bool {
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
 			&& at > 0 && is_word_char(chars[at - 1])
-			&& (2..=3).contains(&tail_len(&chars, at))
+			&& matches!(tail_len(&chars, at), 2 | 3)
 	})
 }
 
 /// How many lowercase letters sit right after the dot at `dot`, capped at 4 so
 /// a long word is not mistaken for a domain tail.
 fn tail_len(chars: &[char], dot: usize) -> usize {
-	let mut len = 0;
-	for ch in chars.iter().skip(dot + 1) {
-		if !ch.is_ascii_lowercase() {
-			break;
-		}
-		len += 1;
-		if len > 4 {
-			break;
-		}
-	}
-	len
+	chars
+		.iter()
+		.skip(dot + 1)
+		.take_while(|ch| ch.is_ascii_lowercase())
+		.take(5)
+		.count()
 }
 
-/// A domain label may carry a hyphen, so the token run includes it.
 /// True when the text still holds a letter or a digit worth keeping.
 fn holds_word(text: &str) -> bool {
 	text.chars().any(|ch| ch.is_alphanumeric())
 }
 
+/// A domain label may carry a hyphen, so the token run includes it.
 fn is_word_char(ch: char) -> bool {
 	(ch.is_alphanumeric() || ch == '-') && is_prose_char(ch)
 }
