@@ -205,12 +205,141 @@ Chapitres 22 à 28 de `shadow-slave`, `city-of-witches` et `chaotic-craftsman` :
 **21 identiques**. Les changements sont localisés sur les chapitres qui portent un
 crédit.
 
+## Comparaison avec l'implémentation upstream
+
+L'upstream (`Aidoku-Community/sources`) fait 200 lignes et 10 fonctions. La nôtre en
+fait 520 et 27. Ce n'est pas la même idée : upstream coupe des lignes, nous décidons
+des phrases.
+
+### Méthode
+
+| Point | Choix |
+|:--|:--|
+| Corpus | 97 chapitres, 168 905 mots : 65 `en.chikari` et 32 `en.novelbuddy` |
+| Entrée | le texte du chapitre, les 59 chapitres arrivés en HTML étant convertis d'abord, comme le fait `markdown.rs` |
+| Application | bloc par bloc, exactement comme `markdown.rs` appelle `watermark::strip` |
+| Référence << sans watermark >> | les mêmes blocs recousus, réglage éteint |
+| Égalité de traitement | les deux implémentations reçoivent le même texte, au caractère près |
+
+### Résultat global
+
+| Mesure | Brut | Notre | Upstream |
+|:--|------:|------:|------:|
+| Mots | 168 905 | 168 703 | 167 391 |
+| Mots retirés | - | **202** | **1 514** |
+| Lignes | 18 187 | 18 173 | 17 895 |
+| Chapitres modifiés | - | 58 | 58 |
+| Sorties différentes | - | 49 chapitres | 49 chapitres |
+| Caractères hors prose restants | 358 | **0** | 20 |
+| Lettres étrangères restantes | 106 | **0** | 14 |
+| Chapitres encore sales | 53 | **0** | 3 |
+
+Upstream retire donc sept fois plus de mots, et laisse pourtant du crédit derrière
+lui. Les deux résultats ne sont pas du même ordre : il jette du texte pour retirer
+un crédit, nous retirons le crédit.
+
+### L'algorithme upstream, en trois étapes
+
+| Étape | Ce qu'elle fait |
+|:--|:--|
+| 1. Blocs | découpe sur les lignes vides |
+| 2. Ligne | si la ligne n'a aucun caractère hors prose, elle est gardée telle quelle ; sinon on coupe au **dernier** point avant ce caractère, et on jette la ligne s'il n'y en a aucun |
+| 3. Réparation | pour un guillemet laissé ouvert, on cherche son fermant dans le reste et on **réinsère tout jusqu'à lui** ; pour un crochet, on ajoute simplement le fermant |
+
+**Bénéfice** : dix fonctions, aucun seuil, aucun réglage, et sur du texte propre elle
+ne touche rien.
+
+**Compromis mesurés** :
+
+| Défaut | Mesure |
+|:--|:--|
+| Perte de prose | **1 174 occurrences** de mots de prose qu'elle retire et que nous gardons (`the` 60 fois, `to` 24, `have` 24, `is` 23) |
+| Crédit laissé | 3 chapitres gardent des caractères hors prose, dont un crédit entier |
+| Réparation contre-productive | l'étape 3 réinsère le texte que l'étape 2 venait de couper, dès que la coupe tombe dans une réplique |
+
+### Nos sept règles, bénéfice et compromis
+
+| Règle | Bénéfice mesuré | Compromis mesuré |
+|:--|:--|:--|
+| 1. Crédit épelé | retire le crédit au milieu d'une phrase **sans perdre la phrase** | les signes accolés partent avec, d'où `(Exclusive on)` laissé |
+| 2. Marqueur de dialogue | garde la réplique et son guillemet | un tiret de tête devient un cadratin |
+| 3. Paires mortes | supprime les blocs de crédit entre crochets, garde les répliques citées | une paire en prose pure reste |
+| 4. Garde anticipée | coût nul sur les lignes déjà propres | aucune |
+| 5. Phrases | décide par phrase, pas par ligne | `Lv. 7` compte pour une phrase |
+| 6. Décision | 202 mots retirés là où upstream en retire 1 514 | la note de traducteur de `city-of-witches` 25 sort tronquée |
+| 7. Recollage | un paragraphe reste un paragraphe | aucune |
+
+### Où chacun gagne
+
+| Cas | Qui gagne | Pourquoi |
+|:--|:--|:--|
+| Crédit au milieu d'une phrase, aucun point avant lui | **nous** | upstream jette la ligne entière |
+| Crédit dans une réplique citée | **nous** | la réparation d'upstream réinsère le crédit |
+| Crédit fait de prose pure, seul dans son paragraphe | **upstream** | nous gardons le nom, lui jette le paragraphe |
+| Note de traducteur | **upstream** | nous la tronquons en son milieu, il la garde ou la jette entière |
+
+### Exemples réels
+
+**A. Crédit épelé au milieu d'une phrase** (`taming-the-villainesses` ch. 42)
+
+| | |
+|:--|:--|
+| brut | `I was wondering what to °* N  v  l i g h t *° do if she ran away.` |
+| notre | `I was wondering what to do if she ran away.` |
+| upstream | **ligne absente du chapitre** |
+
+La ligne n'a aucun point avant le crédit : upstream la jette en entier. Nous retirons
+le crédit et gardons la phrase.
+
+**B. Crédit à lettres ressemblantes, dans une réplique** (`taming-the-villainesses` ch. 43)
+
+| | |
+|:--|:--|
+| brut | `"Of course, there are some things that need to be fixed or tweaked. * Nvlght * (Exclusive on Nvlght) For example, the name 'slave' is a bit out of date."` |
+| notre | `"Of course, there are some things that need to be fixed or tweaked. (Exclusive on) For example, the name 'slave' is a bit out of date."` |
+| upstream | **identique au brut** |
+
+Upstream coupe bien après `tweaked.`, puis son étape 3 voit le guillemet ouvert et
+réinsère tout jusqu'au guillemet fermant : le crédit revient. Nous retirons le crédit
+et laissons `(Exclusive on)`, qui est de la prose.
+
+**C. Crédit écrit comme un nom** (`city-of-witches` ch. 22)
+
+| | |
+|:--|:--|
+| brut | `U+273A U+273A Amelia Merigold (1) U+273B` |
+| notre | `Amelia Merigold (1)` |
+| upstream | **paragraphe supprimé** |
+
+Ici upstream a raison sur le fond : c'est le crédit du traducteur. Nous gardons le nom
+parce qu'il est en prose pure, c'est le prix de la règle << pas de vocabulaire >>.
+
+**D. Note de traducteur** (`city-of-witches` ch. 25)
+
+| | |
+|:--|:--|
+| brut | `[T/N- ""/ Gambas, is a Spanish dish with shrimp and garlic as the main ingredients. The name means "shrimp (gambas) and garlic (ajillo)" in Spanish...` |
+| notre | `[The name means "shrimp (gambas) and garlic (ajillo)" in Spanish...` |
+| upstream | garde une autre note, entière |
+
+Notre découpage par phrases retire la première phrase de la note et garde la suite :
+la note commence au milieu. C'est le défaut le plus visible de notre approche sur ce
+corpus.
+
+### Ce que la comparaison ne dit pas
+
+Elle ne mesure pas la qualité littéraire : un mot retiré n'est pas toujours une perte
+(`the` dans un crédit ne vaut pas `the` dans une phrase). Elle ne couvre pas non plus
+les chapitres sans crédit, où les deux implémentations ne changent rien.
+
 ## Limites connues
 
 | Cas | Comportement | Statut |
 |:--|:--|:--|
 | Crédit entièrement en prose (`Nvlght`, `frewebnovel.com`) | laissé | accepté, aucune règle de vocabulaire |
+| Crédit écrit comme un nom (`Amelia Merigold (1)`) | laissé | accepté, upstream jette le paragraphe, nous gardons le nom |
 | Trois débris entre parenthèses (`(Exclusive on)`, `(Read the full story)`, `(Don't copy, read here)`) | laissés | accepté, prix de la récupération des répliques |
+| Note de traducteur commençant par une phrase retirée | sort tronquée (`city-of-witches` 25) | **défaut connu**, la décision se prend par phrase |
 | Phrase portant un domaine | supprimée entière | accepté |
 | Crochets mélangés mal formés `([dead) useful]` | laissés intacts | accepté |
 
