@@ -33,6 +33,8 @@ const SENTENCE_ENDS: &[char] = &[
 	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
 ];
 
+/// Prose is the three blocks, and whitespace from anywhere: a gap between two
+/// words is not a mark the credit left.
 fn is_prose_char(ch: char) -> bool {
 	let code = u32::from(ch);
 	ch.is_whitespace()
@@ -47,7 +49,8 @@ fn is_sign(ch: char) -> bool {
 	!is_prose_char(ch) && !ch.is_alphanumeric()
 }
 
-/// A letter from another script, which is what the credit spells itself with.
+/// A letter or digit from another script, which is what the credit spells
+/// itself with.
 fn is_foreign(ch: char) -> bool {
 	!is_prose_char(ch) && ch.is_alphanumeric()
 }
@@ -231,6 +234,11 @@ fn without_dead_pairs(line: &str) -> String {
 	let mut index = 0;
 	while index < text.len() {
 		let opener = text[index];
+		// A quoted passage is speech to keep, not a bracket to cut.
+		if is_quote(opener) {
+			index += 1;
+			continue;
+		}
 		let Some(close) = pair_close(opener) else {
 			index += 1;
 			continue;
