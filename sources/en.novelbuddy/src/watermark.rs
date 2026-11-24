@@ -557,9 +557,6 @@ fn holds_quoted_symbol(word: &str) -> bool {
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
-	if has_broken_word(text) {
-		return None;
-	}
 	// A sign is decoration: it goes and the word stays. A run of signs between
 	// two letters becomes one space, so the words it separated stay two words.
 	// A letter from another script is the credit's own spelling: the word goes.
@@ -655,7 +652,7 @@ fn clean_line(line: &str) -> Option<String> {
 	let mut parts: Vec<String> = Vec::new();
 	for sentence in sentences(line) {
 		let sentence = sentence.trim();
-		if has_domain(sentence) {
+		if has_domain(sentence) || has_broken_word(sentence) {
 			continue;
 		}
 		if sentence.find(|ch| !is_prose_char(ch)).is_none() {

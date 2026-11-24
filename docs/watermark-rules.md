@@ -232,10 +232,12 @@ La condition exige une lettre **avant** et **après** la parenthèse, dans le m�
 jeton : un caractère seul entre deux espaces, ou en fin de jeton, ne déclenche rien.
 C'est ce qui sauve la rune.
 
-La règle est évaluée **dans** le nettoyage de crédit, pas avant le test de prose. Les
-deux placements donnent la même sortie sur le corpus, parce qu'un tel jeton contient
-une parenthèse et n'entre donc jamais dans la branche de prose pure. Le placement
-interne garde la ligne de décision à trois tests.
+La règle est évaluée **avant** le test de prose, sur la ligne de décision. Le
+placement interne au nettoyage de crédit donnait la même sortie sur le corpus, mais
+seulement parce que les lignes réelles contiennent une espace de largeur nulle qui les
+envoyait déjà dans le nettoyage. Sur un jeton cassé purement ASCII
+(`Read latest chapters at f(r)eewebnovl Only`), le placement interne laissait la ligne
+passer.
 
 **5c - crédit et parenthèse adjacente.** D'abord, `bracket_close` lit `PAIRS` mais
 refuse les ouvertures de `QUOTES`. Le groupe qui touche un jeton portant une lettre
