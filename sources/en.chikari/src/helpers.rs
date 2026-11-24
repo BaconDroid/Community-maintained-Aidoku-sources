@@ -361,7 +361,7 @@ pub fn content_rating(is_nsfw: bool) -> ContentRating {
 	if is_nsfw {
 		ContentRating::NSFW
 	} else {
-		ContentRating::Safe
+		ContentRating::Unknown
 	}
 }
 
