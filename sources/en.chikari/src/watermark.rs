@@ -568,17 +568,6 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 		text.drain(start..end);
 	}
 	let text: String = text.into_iter().collect();
-	let words: Vec<&str> = text.split_whitespace().collect();
-	let internal_dot = words.iter().enumerate().any(|(index, word)| {
-		let dots = word.chars().filter(|ch| *ch == '.').count();
-		word.contains('.') && !(index + 1 == words.len() && word.ends_with('.') && dots == 1)
-	});
-	// A stray foreign letter in a sentence of prose is a decoration; several of
-	// them in the same sentence are the credit spelling itself.
-	let scattered =
-		text.split_whitespace()
-			.filter(|word| word.chars().any(is_foreign))
-			.count() == 1;
 	let mut kept: Vec<String> = Vec::new();
 	for word in text.split_whitespace() {
 		if holds_quoted_symbol(word) {
@@ -611,13 +600,6 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 			continue;
 		}
 		if clean.chars().any(is_foreign) {
-			let foreign_count = clean.chars().filter(|ch| is_foreign(*ch)).count();
-			if foreign_count == 1 && !internal_dot && scattered {
-				let prose: String = clean.chars().filter(|ch| is_prose_char(*ch)).collect();
-				if !prose.is_empty() {
-					kept.push(prose);
-				}
-			}
 			continue;
 		}
 		kept.push(clean);

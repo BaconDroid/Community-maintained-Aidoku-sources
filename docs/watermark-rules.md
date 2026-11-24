@@ -284,19 +284,23 @@ jeton, sinon un numéro de chapitre `220 (` se ferait prendre pour un crochet. U
 touchée si elle porte le même motif étranger adjacent : sa conservation n'est pas une
 contrainte du modèle, mais cette possibilité ne justifie pas à elle seule la règle.
 
-La récupération de prose étrangère fait partie de **5c**. Elle ne s'applique que si
-la phrase ne contient **qu'un seul** mot porteur d'une lettre étrangère, sans point
-interne de domaine : `Fųck, this hurt!` devient `Fck, this hurt!`. Plusieurs mots
-étrangers dans la même phrase, c'est le crédit qui s'épelle à travers elle, et la
-phrase part.
+Il n'y a plus de récupération de prose étrangère. Un mot qui porte une lettre hors des
+trois blocs part, même s'il n'en porte qu'une. C'est ce qui retire `Nvlght` d'une
+référence de site, au prix de `Fųck` : le mot part en entier, il ne devient pas `Fck`.
 
 ```text
-Fųck, this hurt!                                  -> Fck, this hurt!   un mot, récupéré
-fluffy-Th ... orign ... rsts n ... NovlFir(.)nt   -> phrase nettoyée   cinq mots, crédit
+Some things need fixing. Nvlght (Exclusive on Nvlght) For example.
+-> Some things need fixing. For example.
+
+Fųck, this hurt!                       -> this hurt!
+Café cost 5 euros.                     -> Café cost 5 euros.    é est dans Latin-1
+He said 你好 to her.             -> He said to her.        CJK hors blocs
 ```
 
-Le seuil `<= 2` a été mesuré : il réintroduit `NvIight` dans `taming` 44, qui est un
-crédit. Une seule lettre étrangère est donc le seuil retenu. Il n'y a plus de 5d séparée.
+La décision se prend uniquement avec les trois blocs de prose et le test
+alphanumérique : `is_foreign` est vrai pour tout caractère alphanumérique hors des
+blocs. Aucune plage supplémentaire n'est déclarée, donc aucun caractère n'est classé
+par sa ressemblance.
 
 ### 6. Le recollage - `strip`
 
