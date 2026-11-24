@@ -104,7 +104,7 @@ fn trailing_sign_start(text: &str) -> usize {
 }
 
 fn spelled_run(text: &[char], start: usize) -> Option<usize> {
-	if !text.get(start)?.is_alphabetic() {
+	if !text.get(start).is_some_and(|ch| ch.is_alphabetic()) {
 		return None;
 	}
 	if start > 0 && text[start - 1].is_alphanumeric() {
@@ -433,30 +433,28 @@ fn wrapped_text(line: &str, mark_end: usize) -> Option<String> {
 	(!inner.is_empty()).then(|| String::from(inner))
 }
 
-/// True when the sentence carries a domain-shaped token.
+/// True when the sentence carries a domain-shaped token: a dot, a letter or digit
+/// before it, and two or three lowercase letters after it.
 fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
-			&& at > 0 && is_word_char(chars[at - 1])
-			&& matches!(tail_len(&chars, at), 2 | 3)
+			&& at > 0 && is_prose_char(chars[at - 1])
+			&& (chars[at - 1].is_alphanumeric() || chars[at - 1] == '-')
+			&& {
+				let tail = chars
+					.iter()
+					.skip(at + 1)
+					.take_while(|ch| ch.is_ascii_lowercase())
+					.count();
+				let head = chars[..at]
+					.iter()
+					.rev()
+					.take_while(|ch| (**ch).is_alphanumeric() || **ch == '-')
+					.count();
+				tail > 1 && tail < head
+			}
 	})
-}
-
-/// How many lowercase letters sit right after the dot at `dot`, capped at 4 so
-/// a long word is not mistaken for a domain tail.
-fn tail_len(chars: &[char], dot: usize) -> usize {
-	chars
-		.iter()
-		.skip(dot + 1)
-		.take_while(|ch| ch.is_ascii_lowercase())
-		.take(4)
-		.count()
-}
-
-/// A domain label may carry a hyphen, so the token run includes it.
-fn is_word_char(ch: char) -> bool {
-	(ch.is_alphanumeric() || ch == '-') && is_prose_char(ch)
 }
 
 /// The closer of a bracket, never of a quote: a quoted line is speech to keep,
@@ -522,12 +520,7 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 		while back > 0 && (chars[back - 1].is_whitespace() || is_sign(chars[back - 1])) {
 			back -= 1;
 		}
-		if back == 0 {
-			continue;
-		}
-		// Without a space between them, the token starts on the bracket, so the
-		// closer found above belongs to the token, not to a group before it.
-		if !chars[back - 1].is_whitespace() {
+		if back == 0 || !chars[back - 1].is_whitespace() {
 			continue;
 		}
 		let closer = chars[back - 1];
@@ -545,17 +538,14 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 /// credit spelling itself, so the word keeps its shape.
 fn holds_quoted_symbol(word: &str) -> bool {
 	let chars: Vec<char> = word.chars().collect();
-	let mut at = 0;
-	while at < chars.len() {
-		if chars[at] == '('
-			&& chars.get(at + 1).is_some_and(|ch| !is_prose_char(*ch))
-			&& chars.get(at + 2) == Some(&')')
-		{
-			return true;
-		}
-		at += 1;
-	}
-	false
+	chars.iter().enumerate().any(|(at, ch)| {
+		bracket_close(*ch).is_some_and(|close| {
+			chars
+				.get(at + 1)
+				.is_some_and(|inner| !is_prose_char(*inner))
+				&& chars.get(at + 2) == Some(&close)
+		})
+	})
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
@@ -611,17 +601,26 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 
 /// A letter wrapped in parentheses inside a word is a site name broken up to
 /// dodge filters: `fr(e)webnovel` spells a domain, it is not prose.
+/// A bracket that opens or closes a word: every neighbour that exists is a letter,
+/// and at least one neighbour exists. A digit or a space beside it is a stat line
+/// or a detached parenthesis, not a domain broken up to dodge filters.
+fn bracket_inside_word(chars: &[char], at: usize, close: char) -> bool {
+	if chars.get(at + 1).is_none() || chars.get(at + 2) != Some(&close) {
+		return false;
+	}
+	let left = at.checked_sub(1).and_then(|index| chars.get(index));
+	let right = chars.get(at + 3);
+	(left.is_some() || right.is_some())
+		&& left.is_none_or(|ch| ch.is_alphabetic())
+		&& right.is_none_or(|ch| ch.is_alphabetic())
+		&& !chars.iter().any(|ch| ch.is_numeric())
+}
+
 fn has_broken_word(sentence: &str) -> bool {
 	sentence.split_whitespace().any(|word| {
 		let chars: Vec<char> = word.chars().collect();
 		chars.iter().enumerate().any(|(at, ch)| {
-			bracket_close(*ch).is_some_and(|close| {
-				at > 0
-					&& chars[at - 1].is_alphabetic()
-					&& chars.get(at + 1).is_some()
-					&& chars.get(at + 2) == Some(&close)
-					&& chars.get(at + 3).is_some_and(|after| after.is_alphabetic())
-			})
+			bracket_close(*ch).is_some_and(|close| bracket_inside_word(&chars, at, close))
 		})
 	})
 }

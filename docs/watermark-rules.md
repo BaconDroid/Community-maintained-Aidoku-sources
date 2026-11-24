@@ -336,6 +336,11 @@ pas protégées dans l'une ou l'autre sortie.
 | `SENTENCE_ENDS` | 9 caractères | couper les phrases |
 | `SPELLED_MIN_LETTERS` | 4 | seuil de l'épellation |
 
+Le module n'a plus que quatre classificateurs de caractère : `is_prose_char`, `is_sign`,
+`is_foreign` et `is_quote`. Les autres tests s'écrivent avec eux. `has_domain` en est
+l'exemple : le point, la lettre avant, les minuscules après, tout tient dans une seule
+expression au lieu de deux fonctions dédiées.
+
 `PAIRS` sert à **supprimer**, `QUOTES` seulement à **lire**. C'est pourquoi les
 guillemets ASCII sont dans `QUOTES` et pas dans `PAIRS` : ils s'écrivent seuls
 (pouces, apostrophe) et y mettre exposerait à supprimer du texte.
