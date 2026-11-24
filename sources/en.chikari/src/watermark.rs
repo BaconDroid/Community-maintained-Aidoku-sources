@@ -116,16 +116,27 @@ fn spelled_run(text: &[char], start: usize) -> Option<usize> {
 	let mut at = start + 1;
 	let mut letters = 1;
 	let mut end = at;
+	let mut spaced: Option<bool> = None;
 	loop {
 		let before = at;
+		let mut blanks = 0;
 		while text
 			.get(at)
 			.is_some_and(|ch| is_separator(*ch) && pair_close(*ch).is_none())
 		{
+			if text[at].is_whitespace() {
+				blanks += 1;
+			}
 			at += 1;
 		}
 		if at == before {
 			break;
+		}
+		let spaced_here = blanks > 0;
+		match spaced {
+			None => spaced = Some(spaced_here),
+			Some(first) if first != spaced_here => break,
+			_ => {}
 		}
 		let Some(letter) = text.get(at) else {
 			break;
@@ -252,12 +263,12 @@ fn without_dead_pairs(line: &str) -> String {
 			if is_quote(*ch) {
 				continue;
 			}
-			if pair_close(*ch).is_some() {
+			if bracket_close(*ch).is_some() {
 				stack.push(at);
 				continue;
 			}
 			if let Some(&open) = stack.last()
-				&& pair_close(text[open]) == Some(*ch)
+				&& bracket_close(text[open]) == Some(*ch)
 			{
 				stack.pop();
 				pairs.push((open, at));
@@ -546,6 +557,9 @@ fn holds_quoted_symbol(word: &str) -> bool {
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
+	if has_broken_word(text) {
+		return None;
+	}
 	// A sign is decoration: it goes and the word stays. A run of signs between
 	// two letters becomes one space, so the words it separated stay two words.
 	// A letter from another script is the credit's own spelling: the word goes.
@@ -612,6 +626,23 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 		kept.push(clean);
 	}
 	(!kept.is_empty()).then(|| kept.join(" "))
+}
+
+/// A letter wrapped in parentheses inside a word is a site name broken up to
+/// dodge filters: `fr(e)webnovel` spells a domain, it is not prose.
+fn has_broken_word(sentence: &str) -> bool {
+	sentence.split_whitespace().any(|word| {
+		let chars: Vec<char> = word.chars().collect();
+		chars.iter().enumerate().any(|(at, ch)| {
+			bracket_close(*ch).is_some_and(|close| {
+				at > 0
+					&& chars[at - 1].is_alphabetic()
+					&& chars.get(at + 1).is_some()
+					&& chars.get(at + 2) == Some(&close)
+					&& chars.get(at + 3).is_some_and(|after| after.is_alphabetic())
+			})
+		})
+	})
 }
 
 fn clean_line(line: &str) -> Option<String> {

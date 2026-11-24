@@ -15,7 +15,7 @@ ont tranché chaque choix. Les chiffres viennent d'un corpus de 127 chapitres :
 | Copie | `sources/en.novelbuddy/src/watermark.rs`, **identique octet pour octet** |
 | Idem pour | `markdown.rs` et `mtl.rs` |
 | Appelé par | `markdown.rs`, une fois **par paragraphe**, si le réglage `hide_watermark` est actif |
-| Taille | 599 lignes |
+| Taille | 679 lignes |
 
 Toute modification se fait dans une copie puis se recopie dans l'autre. Vérifier
 après : `md5sum` des deux doit être égal.
@@ -193,7 +193,7 @@ décision par phrase conserve la phrase nettoyée.
 |:-:|:--|:--|:--|
 | 5a | domaine : point, mot avant, 2 ou 3 minuscules après | phrase supprimée | `frewebnovel.com` au milieu d'une phrase |
 | 5b | prose pure (test d'entrée) | phrase gardée telle quelle | récit normal et notes en prose |
-| 5c | crédit d'un seul tenant | nettoyage mot par mot + crochet touchant | références de site ou groupe au milieu |
+| 5c | crédit : jeton cassé, crochet touchant, mots étrangers | nettoyage, ou `None` | `fr(e)webnovel`, `* Nvlght * (Only on Nvlgt)` |
 | 5d | rien de lisible | phrase supprimée | `.`, `*` et fragments vides |
 
 **5a - domaine.** Le domaine est une cible prioritaire : une phrase qui contient un
@@ -216,6 +216,27 @@ peut aussi rester, mais ce n'est pas une garantie à préserver : une règle qui
 une référence de site peut retirer la note voisine avec elle. Cette branche n'est
 pas une règle de suppression de notes.
 
+**5c - jeton cassé (première étape de 5c).** Un jeton qui porte une lettre, une
+parenthèse, un caractère unique, la fermeture, puis encore une lettre est un domaine
+découpé pour échapper aux filtres. La phrase part entière.
+
+```text
+Read latest chapters at f(r)eewebnovl Only     -> supprimé
+The source is free(w)bnov()l                   -> supprimé
+This is fr(e)ewebnovel                         -> supprimé
+runic letter '(\u{16C7}).'                     -> conservé
+He paused (briefly) and left.                  -> conservé
+```
+
+La condition exige une lettre **avant** et **après** la parenthèse, dans le même
+jeton : un caractère seul entre deux espaces, ou en fin de jeton, ne déclenche rien.
+C'est ce qui sauve la rune.
+
+La règle est évaluée **dans** le nettoyage de crédit, pas avant le test de prose. Les
+deux placements donnent la même sortie sur le corpus, parce qu'un tel jeton contient
+une parenthèse et n'entre donc jamais dans la branche de prose pure. Le placement
+interne garde la ligne de décision à trois tests.
+
 **5c - crédit et parenthèse adjacente.** D'abord, `bracket_close` lit `PAIRS` mais
 refuse les ouvertures de `QUOTES`. Le groupe qui touche un jeton portant une lettre
 étrangère est retiré avant le passage mot par mot. Deux branches seulement, pas trois :
@@ -229,8 +250,9 @@ cas distinct : c'est le même saut.
 * Nvlght *\t(Only on Nvlgt)          blanc quelconque : même branche
 ```
 
-Sur les 97 chapitres, la branche << avant >> et les formes collées n'ajoutent aucun
-retrait : la sortie est identique au caractère près. Elles restent comme protection.
+Sur le corpus de 216 chapitres, la branche << avant >> et les formes collées
+n'ajoutent aucun retrait mesurable : la sortie est identique au caractère près. Elles
+restent comme protection.
 
 Ensuite les signes sont retirés, les signes entre deux lettres deviennent une espace,
 et le mot qui garde une lettre étrangère part.
@@ -313,18 +335,20 @@ guillemets ASCII sont dans `QUOTES` et pas dans `PAIRS` : ils s'écrivent seuls
 
 ## Mesures de référence
 
-Second corpus, 192 chapitres : 24 par roman et par source, huit premiers, huit au
-milieu, huit derniers.
+Second corpus, 216 chapitres : 24 par roman et par source, huit premiers, huit au
+milieu, huit derniers. Cinq romans : `shadow-slave`, `chaotic-craftsman-worships-the-cube`,
+`city-of-witches`, `taming-the-villainesses` et `delve`. Delve n'existe que sur
+Novelbuddy.
 
 | Mesure | Valeur |
 |:--|--:|
-| Chapitres | 192 |
-| Mots bruts | 342 762 |
-| Mots en sortie | 342 377 |
-| Mots retirés | 385 |
+| Chapitres | 216 |
+| Mots bruts | 437 154 |
+| Mots en sortie | 436 753 |
+| Mots retirés | 401 |
 | Caractères hors prose | 0 |
 | Chapitres sales | 0 |
-| Écart avec la version publiée `0a81c77` | 0 chapitre |
+| Écart avec la version publiée `6b091a6` | 11 chapitres, tous du crédit |
 
 
 
