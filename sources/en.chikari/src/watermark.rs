@@ -522,13 +522,15 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 		while back > 0 && (chars[back - 1].is_whitespace() || is_sign(chars[back - 1])) {
 			back -= 1;
 		}
-		if back == 0 || is_quote(chars[back - 1]) {
+		if back == 0 {
+			continue;
+		}
+		// Without a space between them, the token starts on the bracket, so the
+		// closer found above belongs to the token, not to a group before it.
+		if !chars[back - 1].is_whitespace() {
 			continue;
 		}
 		let closer = chars[back - 1];
-		if !chars[back - 1].is_ascii() || chars[start..at].iter().any(|ch| ch.is_ascii_digit()) {
-			continue;
-		}
 		let Some(open) = matching_opener(closer) else {
 			continue;
 		};

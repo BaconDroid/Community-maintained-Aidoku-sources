@@ -279,8 +279,9 @@ He fixed it. Nvlght(Exclusive on Nvlght) Then he left.    -> groupe retiré
 He fixed it. (Only on Nvlght) Nvlght Then he left.        -> groupe retiré
 ```
 
-La branche avant est restreinte aux fermants non ASCII sans chiffre ASCII dans le
-jeton, sinon un numéro de chapitre `220 (` se ferait prendre pour un crochet. Une note `T/N`, `E/N` ou `Edited by` peut toutefois être
+La branche avant exige un blanc entre le crochet et le jeton. Sans lui, le jeton
+commence sur la parenthèse et le fermant trouvé appartient au jeton, pas à un groupe
+placé avant. C'est ce qui remplace l'ancien test sur les chiffres ASCII. Une note `T/N`, `E/N` ou `Edited by` peut toutefois être
 touchée si elle porte le même motif étranger adjacent : sa conservation n'est pas une
 contrainte du modèle, mais cette possibilité ne justifie pas à elle seule la règle.
 
