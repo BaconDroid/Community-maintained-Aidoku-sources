@@ -2,10 +2,10 @@
 
 use aidoku::alloc::{String, Vec};
 
-const PROSE_BLOCKS: &[(u32, u32)] = &[
-	(0x0000, 0x007F), // Basic Latin
-	(0x0080, 0x00FF), // Latin-1 Supplement
-	(0x2000, 0x206F), // General Punctuation
+const PROSE_BLOCKS: &[(char, char)] = &[
+	('\u{0000}', '\u{007F}'), // Basic Latin
+	('\u{0080}', '\u{00FF}'), // Latin-1 Supplement
+	('\u{2000}', '\u{206F}'), // General Punctuation
 ];
 
 const PAIRS: &[(char, char)] = &[
@@ -33,14 +33,21 @@ const SENTENCE_ENDS: &[char] = &[
 	'.', '!', '?', '\u{2026}', '\u{203C}', '\u{203D}', '\u{2047}', '\u{2048}', '\u{2049}',
 ];
 
+/// The punctuation a sentence keeps between its ends: a pause, not a stop. The
+/// credit reads it as prose, so it comes back with the sentence instead of
+/// leaving with the marks.
+const SENTENCE_PAUSES: &[char] = &[',', ';', ':'];
+
+/// A line break ends a line, so it never separates two words.
+const LINE_BREAKS: &[char] = &['\n', '\r'];
+
 /// Prose is the three blocks, and whitespace from anywhere: a gap between two
 /// words is not a mark the credit left.
 fn is_prose_char(ch: char) -> bool {
-	let code = u32::from(ch);
 	ch.is_whitespace()
 		|| PROSE_BLOCKS
 			.iter()
-			.any(|(start, end)| (*start..=*end).contains(&code))
+			.any(|(start, end)| (*start..=*end).contains(&ch))
 }
 
 /// A sign from another script: a bracket, a dash, a bullet. It is not prose,
@@ -62,7 +69,7 @@ fn is_noisy(word: &str) -> bool {
 }
 
 fn is_separator(ch: char) -> bool {
-	!ch.is_alphanumeric() && ch != '\n' && ch != '\r'
+	!ch.is_alphanumeric() && !LINE_BREAKS.contains(&ch)
 }
 
 fn is_quote(ch: char) -> bool {
@@ -77,30 +84,32 @@ fn matching_opener(close: char) -> Option<char> {
 	PAIRS.iter().find(|pair| pair.1 == close).map(|pair| pair.0)
 }
 
-/// The closing character a quote expects: an ASCII quote closes on itself,
-/// every other quote takes its counterpart from `PAIRS`.
-fn quote_close(open: char) -> Option<char> {
-	match open {
-		'"' | '\'' => Some(open),
-		_ => pair_close(open),
+/// The other half of a quotation mark: an ASCII quote closes on itself, every
+/// other quote takes its counterpart from `PAIRS`. The direction matters: an
+/// opener is paired with its closer, a closer with its opener, and the two
+/// answers differ for `\u{201C}` or `\u{AB}`.
+fn quote_counterpart(quote: char, from_opener: bool) -> Option<char> {
+	if !is_quote(quote) {
+		return None;
+	}
+	if quote.is_ascii() {
+		return Some(quote);
+	}
+	if from_opener {
+		pair_close(quote)
+	} else {
+		matching_opener(quote)
 	}
 }
 
 /// How many bytes the leading run of signs takes.
-fn sign_run(text: &str) -> usize {
-	text.char_indices()
-		.take_while(|(_, ch)| is_sign(*ch))
-		.map(|(index, ch)| index + ch.len_utf8())
-		.last()
-		.unwrap_or(0)
+fn leading_sign_len(text: &str) -> usize {
+	text.len() - text.trim_start_matches(is_sign).len()
 }
 
 /// Where the trailing run of signs starts.
 fn trailing_sign_start(text: &str) -> usize {
-	text.char_indices()
-		.rev()
-		.find(|(_, ch)| !is_sign(*ch))
-		.map_or(0, |(index, ch)| index + ch.len_utf8())
+	text.trim_end_matches(is_sign).len()
 }
 
 fn spelled_run(text: &[char], start: usize) -> Option<usize> {
@@ -155,7 +164,7 @@ fn spelled_run(text: &[char], start: usize) -> Option<usize> {
 }
 
 /// The marks a credit left on one side, past the spaces that touch it.
-fn marks(side: impl Iterator<Item = char>) -> usize {
+fn count_marks(side: impl Iterator<Item = char>) -> usize {
 	let mut count = 0;
 	let mut seen = false;
 	for ch in side {
@@ -182,8 +191,15 @@ fn strip_injected(markdown: &str) -> String {
 			index += 1;
 			continue;
 		};
-		let left = marks(output.chars().rev());
-		let right = marks(text[span..].iter().copied());
+		let left = count_marks(output.chars().rev());
+		let right = count_marks(text[span..].iter().copied());
+		// A credit wears marks on both sides of the letters it spells. Without a
+		// mark on each side, the run is prose that happens to hold separators.
+		if left == 0 || right == 0 {
+			output.push(text[index]);
+			index += 1;
+			continue;
+		}
 		for _ in 0..left {
 			output.pop();
 		}
@@ -279,29 +295,28 @@ fn without_dead_pairs(line: &str) -> String {
 		let mut changed = false;
 		for (open, close_at) in pairs {
 			let content = &text[open + 1..close_at];
-			let blank = content.iter().all(|ch| ch.is_whitespace());
 			let foreign = content.iter().any(|ch| !is_prose_char(*ch));
-			if !(blank || foreign) {
+			// An empty pair is prose the site left behind, as in `Your
+			// Contribution: <>`: no letter of a credit is in it.
+			if !foreign {
 				continue;
 			}
-			if foreign {
-				if content.len() <= 1 {
+			if content.len() <= 1 {
+				continue;
+			}
+			let inner: String = content.iter().collect();
+			let mut kept: Vec<String> = Vec::new();
+			for sentence in sentences(&inner) {
+				let words = trim_noisy_walls(&sentence);
+				if words.is_empty() || words.iter().any(|word| is_noisy(word)) {
 					continue;
 				}
-				let inner: String = content.iter().collect();
-				let mut kept: Vec<String> = Vec::new();
-				for sentence in sentences(&inner) {
-					let words = trim_noisy_walls(&sentence);
-					if words.is_empty() || words.iter().any(|word| is_noisy(word)) {
-						continue;
-					}
-					kept.push(words.join(" "));
-				}
-				if !kept.is_empty() {
-					text.splice(open + 1..close_at, kept.join(" ").chars());
-					changed = true;
-					break;
-				}
+				kept.push(words.join(" "));
+			}
+			if !kept.is_empty() {
+				text.splice(open + 1..close_at, kept.join(" ").chars());
+				changed = true;
+				break;
 			}
 			let mut close_end = close_at + 1;
 			if text.get(close_end) == Some(&' ') && (open == 0 || text[open - 1] == ' ') {
@@ -320,25 +335,11 @@ fn without_dead_pairs(line: &str) -> String {
 
 /// A quote may front the marks of a dialogue line: it is set aside so the marks
 /// are still read as the opener, then put back in front of the result.
-/// The opening quote that expects `close`, and only a quote: a bracket keeps
-/// the em dash, because a bracket is not speech.
-fn quote_open(close: char) -> Option<char> {
-	if !is_quote(close) {
-		return None;
-	}
-	match close {
-		'"' | '\'' => Some(close),
-		_ => matching_opener(close),
-	}
-}
-
 fn dialogue_line(line: &str) -> String {
-	let lead_end = line
-		.char_indices()
-		.take_while(|(_, ch)| is_sign(*ch) || is_quote(*ch) || *ch == ' ')
-		.map(|(index, ch)| index + ch.len_utf8())
-		.last()
-		.unwrap_or(0);
+	let lead_end = line.len()
+		- line
+			.trim_start_matches(|ch| is_sign(ch) || is_quote(ch) || ch == ' ')
+			.len();
 	let lead = &line[..lead_end];
 	if !lead.chars().any(is_quote) || !lead.chars().any(is_sign) {
 		return dialogue_marks(line);
@@ -347,12 +348,17 @@ fn dialogue_line(line: &str) -> String {
 	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
 	// The closer need not be the last character: a line may close its speech
 	// and keep talking.
-	let closes = quote_close(quote).is_some_and(|close| rest.contains(close));
+	let closes = quote_counterpart(quote, true).is_some_and(|close| rest.contains(close));
 	// The closing marker names the family to keep, and it has to be the
 	// counterpart of the opener: a half-quoted line is not a quotation.
 	if !closes {
 		// The line closes on some other quote: keep a quote, the one that expects it.
-		if let Some(open) = line.trim_end().chars().next_back().and_then(quote_open) {
+		if let Some(open) = line
+			.trim_end()
+			.chars()
+			.next_back()
+			.and_then(|close| quote_counterpart(close, false))
+		{
 			let mut out = String::from(open);
 			if lead.ends_with(' ') {
 				out.push(' ');
@@ -364,7 +370,7 @@ fn dialogue_line(line: &str) -> String {
 		let kept = rest.trim_end();
 		let kept = match kept.chars().next_back() {
 			Some(ch) if !is_quote(ch) && matching_opener(ch).is_some() => {
-				&kept[..kept.len() - ch.len_utf8()]
+				kept.strip_suffix(ch).unwrap_or(kept)
 			}
 			_ => kept,
 		};
@@ -381,7 +387,7 @@ fn dialogue_line(line: &str) -> String {
 }
 
 fn dialogue_marks(line: &str) -> String {
-	let mark_end = sign_run(line);
+	let mark_end = leading_sign_len(line);
 	if mark_end == 0 {
 		return line.into();
 	}
@@ -393,7 +399,7 @@ fn dialogue_marks(line: &str) -> String {
 		let rest = &line[start..];
 		let trimmed = rest.trim_start();
 		let spaces = rest.len() - trimmed.len();
-		let end = sign_run(trimmed);
+		let end = leading_sign_len(trimmed);
 		if end == 0 {
 			start += spaces;
 			break;
@@ -440,7 +446,7 @@ fn has_domain(sentence: &str) -> bool {
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
 			&& at > 0 && is_prose_char(chars[at - 1])
-			&& (chars[at - 1].is_alphanumeric() || chars[at - 1] == '-')
+			&& is_domain_char(chars[at - 1])
 			&& {
 				let tail = chars
 					.iter()
@@ -450,11 +456,16 @@ fn has_domain(sentence: &str) -> bool {
 				let head = chars[..at]
 					.iter()
 					.rev()
-					.take_while(|ch| (**ch).is_alphanumeric() || **ch == '-')
+					.take_while(|ch| is_domain_char(**ch))
 					.count();
 				tail > 1 && tail < head
 			}
 	})
+}
+
+/// A label of a domain: letters, digits and hyphens, as in `novel-fire`.
+fn is_domain_char(ch: char) -> bool {
+	ch.is_alphanumeric() || ch == '-'
 }
 
 /// The closer of a bracket, never of a quote: a quoted line is speech to keep,
@@ -548,6 +559,67 @@ fn holds_quoted_symbol(word: &str) -> bool {
 	})
 }
 
+/// A credit wears marks on both sides of its word. With a mark on each side they
+/// are its own and leave with it; with one side bare, the mark belongs to the
+/// text and stays. The counts need not agree: `##` before and `#` after is still
+/// one credit.
+fn strip_marked_word(words: &[&str]) -> Vec<String> {
+	let mut kept: Vec<String> = Vec::new();
+	let mut at = 0;
+	while at < words.len() {
+		let word = words[at];
+		at += 1;
+		if word.chars().any(is_foreign) {
+			let left = kept
+				.iter()
+				.rev()
+				.take_while(|mark| is_mark_token(mark))
+				.count();
+			let right = words[at..]
+				.iter()
+				.take_while(|mark| is_mark_token(mark))
+				.count();
+			if left > 0 && right > 0 {
+				kept.truncate(kept.len() - left);
+				// A mark token can carry the sentence's own punctuation, as `#.`
+				// does. It is not a mark and comes back against the last word.
+				let kept_punctuation: String = words[at..at + right]
+					.iter()
+					.flat_map(|mark| mark.chars())
+					.filter(|ch| !is_credit_mark(*ch))
+					.collect();
+				at += right;
+				if let Some(last) = kept.last_mut() {
+					last.push_str(&kept_punctuation);
+				}
+				continue;
+			}
+		}
+		kept.push(word.into());
+	}
+	kept
+}
+
+/// A mark the credit puts around its word: neither a letter nor a digit, nor
+/// the punctuation a sentence keeps.
+fn is_credit_mark(ch: char) -> bool {
+	!ch.is_alphanumeric() && !is_sentence_punctuation(ch)
+}
+
+/// What a sentence keeps: the marks that stop it and the marks that pause it.
+fn is_sentence_punctuation(ch: char) -> bool {
+	SENTENCE_ENDS.contains(&ch) || SENTENCE_PAUSES.contains(&ch)
+}
+
+/// A token that carries at least one credit mark and no letter or digit: `#`,
+/// `***`, or a mark still holding the sentence's punctuation, as `#.` does.
+/// A bare `,` or `.` is the sentence's, not the credit's.
+fn is_mark_token(word: &str) -> bool {
+	!word.is_empty()
+		&& word.chars().all(|ch| !ch.is_alphanumeric())
+		&& word.chars().any(is_credit_mark)
+}
+
 fn clean_credit_sentence(text: &str) -> Option<String> {
 	// A sign is decoration: it goes and the word stays. A run of signs between
 	// two letters becomes one space, so the words it separated stay two words.
@@ -560,8 +632,9 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 		text.drain(start..end);
 	}
 	let text: String = text.into_iter().collect();
+	let words = strip_marked_word(&text.split_whitespace().collect::<Vec<&str>>());
 	let mut kept: Vec<String> = Vec::new();
-	for word in text.split_whitespace() {
+	for word in &words {
 		if holds_quoted_symbol(word) {
 			kept.push(word.into());
 			continue;
