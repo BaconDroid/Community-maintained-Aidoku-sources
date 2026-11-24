@@ -22,7 +22,7 @@ const PAIRS: &[(char, char)] = &[
 	('\u{2039}', '\u{203A}'),
 ];
 
-const SPELLED_MIN_LETTERS: usize = 5;
+const SPELLED_MIN_LETTERS: usize = 4;
 
 const QUOTES: &[char] = &[
 	'"', '\'', '\u{201C}', '\u{201D}', '\u{2018}', '\u{2019}', '\u{AB}', '\u{BB}', '\u{2039}',
@@ -113,20 +113,32 @@ fn spelled_run(text: &[char], start: usize) -> Option<usize> {
 	if !is_separator(*text.get(start + 1)?) {
 		return None;
 	}
-	let mut end = start + 1;
+	let mut at = start + 1;
 	let mut letters = 1;
-	while text.get(end).is_some_and(|ch| is_separator(*ch)) {
-		let Some(letter) = text.get(end + 1) else {
+	let mut end = at;
+	loop {
+		let before = at;
+		while text
+			.get(at)
+			.is_some_and(|ch| is_separator(*ch) && pair_close(*ch).is_none())
+		{
+			at += 1;
+		}
+		if at == before {
+			break;
+		}
+		let Some(letter) = text.get(at) else {
 			break;
 		};
 		if !letter.is_alphabetic() {
 			break;
 		}
-		if text.get(end + 2).is_some_and(|next| next.is_alphanumeric()) {
+		if text.get(at + 1).is_some_and(|next| next.is_alphanumeric()) {
 			break;
 		}
 		letters += 1;
-		end += 2;
+		at += 1;
+		end = at;
 	}
 	(letters >= SPELLED_MIN_LETTERS).then_some(end)
 }
@@ -262,6 +274,9 @@ fn without_dead_pairs(line: &str) -> String {
 				continue;
 			}
 			if foreign {
+				if content.len() <= 1 {
+					continue;
+				}
 				let inner: String = content.iter().collect();
 				let mut kept: Vec<String> = Vec::new();
 				for sentence in sentences(&inner) {
@@ -412,8 +427,7 @@ fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
-			&& at > 0
-			&& is_word_char(chars[at - 1])
+			&& at > 0 && is_word_char(chars[at - 1])
 			&& matches!(tail_len(&chars, at), 2 | 3)
 	})
 }
@@ -473,8 +487,12 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 			continue;
 		}
 		let start = at;
-		while at < chars.len() && !chars[at].is_whitespace() {
+		while at < chars.len() && !chars[at].is_whitespace() && bracket_close(chars[at]).is_none() {
 			at += 1;
+		}
+		if at == start {
+			at += 1;
+			continue;
 		}
 		if !chars[start..at].iter().copied().any(is_foreign) {
 			continue;
@@ -497,6 +515,9 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 			continue;
 		}
 		let closer = chars[back - 1];
+		if !chars[back - 1].is_ascii() || chars[start..at].iter().any(|ch| ch.is_ascii_digit()) {
+			continue;
+		}
 		let Some(open) = matching_opener(closer) else {
 			continue;
 		};
@@ -505,6 +526,23 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 		}
 	}
 	None
+}
+
+/// A single glyph between parentheses is the text quoting a character, not a
+/// credit spelling itself, so the word keeps its shape.
+fn holds_quoted_symbol(word: &str) -> bool {
+	let chars: Vec<char> = word.chars().collect();
+	let mut at = 0;
+	while at < chars.len() {
+		if chars[at] == '('
+			&& chars.get(at + 1).is_some_and(|ch| !is_prose_char(*ch))
+			&& chars.get(at + 2) == Some(&')')
+		{
+			return true;
+		}
+		at += 1;
+	}
+	false
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
@@ -524,8 +562,18 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 		let dots = word.chars().filter(|ch| *ch == '.').count();
 		word.contains('.') && !(index + 1 == words.len() && word.ends_with('.') && dots == 1)
 	});
+	// A stray foreign letter in a sentence of prose is a decoration; several of
+	// them in the same sentence are the credit spelling itself.
+	let scattered =
+		text.split_whitespace()
+			.filter(|word| word.chars().any(is_foreign))
+			.count() == 1;
 	let mut kept: Vec<String> = Vec::new();
 	for word in text.split_whitespace() {
+		if holds_quoted_symbol(word) {
+			kept.push(word.into());
+			continue;
+		}
 		let chars: Vec<char> = word.chars().collect();
 		let mut clean = String::default();
 		let mut at = 0;
@@ -553,7 +601,7 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 		}
 		if clean.chars().any(is_foreign) {
 			let foreign_count = clean.chars().filter(|ch| is_foreign(*ch)).count();
-			if foreign_count == 1 && !internal_dot {
+			if foreign_count == 1 && !internal_dot && scattered {
 				let prose: String = clean.chars().filter(|ch| is_prose_char(*ch)).collect();
 				if !prose.is_empty() {
 					kept.push(prose);

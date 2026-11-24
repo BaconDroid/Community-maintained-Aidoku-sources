@@ -59,7 +59,7 @@ gain sur `Edited by`, `T/N` ou `E/N` est un coût sans bénéfice et doit être 
 
 ### 1. Le crédit épelé - `strip_injected`
 
-**Détection** : une lettre, puis une alternance séparateur + lettre, **5 lettres
+**Détection** : une lettre, puis une alternance séparateur + lettre, **4 lettres
 minimum**, en partant d'une frontière de mot. Les guillemets ne sont pas traités comme
 des crochets : ils sont de la parole à garder.
 
@@ -74,9 +74,22 @@ I was wondering what to °* N  v  l i g h t *° do if she ran away.
 entier. La phrase réelle disparaît avec le crédit.
 
 Les marques sont retirées de chaque côté indépendamment. L'espace restant est ramené
-à 1, ou au multiple de 4 inférieur pour conserver l'indentation. Le seuil de 5 lettres
-reste important : le seuil à 4 ne changeait aucun chapitre et risquait de prendre des
-sigles comme `N.A.S.A.`.
+à 1, ou au multiple de 4 inférieur pour conserver l'indentation. Le seuil est à
+**4 lettres** : sur 192 chapitres, 4 et 5 donnent exactement la même sortie. Le prix
+du seuil à 4 est connu : un sigle pointé de quatre lettres est pris pour un crédit.
+
+```text
+The agency is called N.A.S.A. and it is old.
+-> The agency is called and it is old.
+```
+
+Le corpus n'en contient pas. On ajustera si un chapitre réel en apporte un.
+
+Un crédit écrit à la main n'a pas toujours un séparateur unique entre deux lettres :
+`°* N  v  l  i  g  h  t *°` en utilise deux. Le scan accepte donc **plusieurs**
+séparateurs entre deux lettres, sinon cette forme réelle passe sans être vue. Un
+crochet n'est pas un séparateur : il coupe la suite, ce qui sépare `NovlFir(.)nt` en
+deux jetons au lieu de les souder.
 
 ### 2. Le marqueur de dialogue - `dialogue_line`
 
@@ -86,11 +99,30 @@ Le **lead** est la suite de tête faite de signes, de guillemets et d'espaces.
 |:--|:--|:--|
 | lead avec guillemet et signe, fermant trouvé après | garde l'ouvrant et la réplique | coupe selon la ligne et peut réinsérer le crédit avec le fermant |
 | lead sans fermant répondant | cadratin, fermant de paire orphelin retiré | aucune règle équivalente |
-| fermant de famille différente | conservé | dépend de sa réparation générique |
+| fermant de famille différente que l'ouvrant | l'ouvrant est remplacé par le guillemet qui attend ce fermant | dépend de sa réparation générique |
 
 Le remplacement est U+2014, jamais `-` ASCII : un tiret ASCII en tête de ligne peut
 créer une puce Markdown. La règle a changé 20 lignes du corpus dans les mesures de
 régression précédentes.
+
+**Le cas du fermant d'une autre famille**, parce que << conservé >> serait faux. Le
+code ne garde pas l'ouvrant : il garde un guillemet, celui qui attend le fermant réel.
+
+```text
+"Bonjour," dit-il.        ouvrant " attend " ; la ligne finit par "
+-> "Bonjour," dit-il.     rien ne change, le fermant est celui attendu
+
+« Bonjour."               ouvrant « attend » ; aucun » ; la ligne finit par "
+-> "Bonjour."             un fermant " attend un ouvrant " : c'est lui qui reste
+
+« Bonjour.                ouvrant « attend » ; rien pour refermer
+-> — Bonjour.             le préfixe devient un cadratin
+```
+
+La troisième ligne est le cas << orphelin >> : le fermant qui appartenait au
+guillemet jeté part avec lui. C'est ce qui protège les 20 lignes du corpus qui
+ouvrent et ferment sur des familles différentes : elles gardent une citation
+cohérente au lieu d'un guillemet orphelin.
 
 ### 3. Les paires mortes - `without_dead_pairs`
 
@@ -106,8 +138,36 @@ de l'intérieur vers l'extérieur.
 |:--|:--|:--|
 | blanc | groupe supprimé | réparation générique |
 | signes + phrases lisibles | phrases propres conservées | coupe la ligne autour du premier bruit |
-| aucun texte lisible | groupe supprimé | ligne supprimée |
-| prose pure | groupe conservé | groupe conservé |
+| hors prose, aucune phrase entièrement propre | groupe supprimé | ligne supprimée |
+| prose pure, même un mot ou deux | groupe conservé | groupe conservé |
+| un seul caractère hors prose entre parenthèses | groupe conservé | selon sa réparation |
+
+La dernière ligne est le cas de la rune : `'(\u{16C7}).'` cite un glyphe, ce n'est pas
+un crédit. Le mot qui contient `(x)` avec un seul caractère hors prose est donc gardé
+tel quel, avant tout nettoyage.
+
+```text
+It was the runic letter '(\u{16C7}).' in the book.   -> inchangé
+It was the runic letter '(\u{16C7}).'                -> inchangé
+```
+
+La troisième ligne compte : un groupe de prose pure n'est pas jugé sur sa longueur.
+`(gambas)`, `(1)`, `(a [\] c)` restent, parce qu'ils ne portent aucun caractère hors
+prose. Une phrase n'est retirée que si elle contient du bruit, pas parce qu'elle est
+courte.
+
+Exemples réels, dans les deux sens :
+
+```text
+He said (to me. x done) end
+-> He said (to me.) end          la phrase lisible reste, le bruit part
+
+Edited by: faker[T/N: join the dşçöŕd (here) for spoilers, ...]
+-> Edited by: faker               aucune phrase entièrement propre : le groupe part
+
+She picked up (gambas) and left.
+-> She picked up (gambas) and left.   deux mots, prose pure : rien ne change
+```
 
 La pile est importante pour les paires imbriquées. Retirer les guillemets de `PAIRS`
 semble plus simple, mais casse `quote_close` et laisse des fermants orphelins.
@@ -132,7 +192,7 @@ décision par phrase conserve la phrase nettoyée.
 | Ordre | Test | Notre action | Cible réelle |
 |:-:|:--|:--|:--|
 | 5a | domaine : point, mot avant, 2 ou 3 minuscules après | phrase supprimée | `frewebnovel.com` au milieu d'une phrase |
-| 5b | prose pure | phrase gardée | récit normal et notes en prose |
+| 5b | prose pure (test d'entrée) | phrase gardée telle quelle | récit normal et notes en prose |
 | 5c | crédit d'un seul tenant | nettoyage mot par mot + crochet touchant | références de site ou groupe au milieu |
 | 5d | rien de lisible | phrase supprimée | `.`, `*` et fragments vides |
 
@@ -140,16 +200,40 @@ décision par phrase conserve la phrase nettoyée.
 site est supprimée entière. Upstream peut aussi supprimer la ligne, mais sa découpe
 peut prendre du récit autour du domaine.
 
-**5b - prose.** Une phrase de récit pure reste toujours. Une note d'auteur ou de
-traducteur en prose peut aussi rester, mais ce n'est pas une garantie à préserver :
-une règle qui retire une référence de site peut retirer la note voisine avec elle.
-Cette branche n'est pas une règle de suppression de notes.
+**5b - prose (test d'entrée, pas une décision).** Le test intervient avant le
+nettoyage, pour que 5c ne touche pas une phrase qui n'a rien à nettoyer. Il n'est pas
+une règle de décision et il occupe donc sa place actuelle : après le domaine, avant
+le crédit. Le déplacer plus bas ferait passer une phrase propre dans le nettoyage mot
+par mot, qui retire les signes isolés et transforme une suite de signes entre deux
+lettres en espace. La sortie resterait identique sur le corpus, mais la garde
+disparaîtrait pour une phrase de prose contenant `*` ou `-`.
+
+Le retirer est mesuré sans effet sur les 97 chapitres. Il est gardé comme garde
+d'identité, et non comme règle de nettoyage.
+
+Une phrase de récit pure reste toujours. Une note d'auteur ou de traducteur en prose
+peut aussi rester, mais ce n'est pas une garantie à préserver : une règle qui retire
+une référence de site peut retirer la note voisine avec elle. Cette branche n'est
+pas une règle de suppression de notes.
 
 **5c - crédit et parenthèse adjacente.** D'abord, `bracket_close` lit `PAIRS` mais
 refuse les ouvertures de `QUOTES`. Le groupe qui touche un jeton portant une lettre
-étrangère est retiré avant le passage mot par mot : avant, après, collé ou séparé par
-des signes. Ensuite les signes sont retirés, les signes entre deux lettres deviennent
-une espace, et le mot qui garde une lettre étrangère part.
+étrangère est retiré avant le passage mot par mot. Deux branches seulement, pas trois :
+le crochet **après** le jeton, et le crochet **avant** le jeton. Entre le jeton et le
+crochet, le code saute indifféremment blancs et signes, donc << collé >> n'est pas un
+cas distinct : c'est le même saut.
+
+```text
+* Nvlght * (Exclusive on Nvlght)    espaces et signes autour du crochet
+* Nvlght *(Exclusive on Nvlght)     collé : même branche
+* Nvlght *\t(Only on Nvlgt)          blanc quelconque : même branche
+```
+
+Sur les 97 chapitres, la branche << avant >> et les formes collées n'ajoutent aucun
+retrait : la sortie est identique au caractère près. Elles restent comme protection.
+
+Ensuite les signes sont retirés, les signes entre deux lettres deviennent une espace,
+et le mot qui garde une lettre étrangère part.
 
 Le corpus donne cinq retraits, quatre formes :
 
@@ -161,15 +245,31 @@ Le corpus donne cinq retraits, quatre formes :
 | `...many * Nvlght * (Read the full story) people...` | parenthèse supprimée | crédit conservé |
 
 Les deux occurrences de `(Read the full story)` sont dans les chapitres 46 et 49.
-Les deux extensions avant/collé n'ont ajouté aucun cas sur le corpus, mais elles sont
-conservées comme protection. Une note `T/N`, `E/N` ou `Edited by` peut toutefois être
+La branche avant et les formes collées sont désormais réellement couvertes : le scan
+s'arrête sur un crochet, donc `Novlght(Exclusive on ...)` est vu comme un jeton suivi
+d'un groupe, et non comme un seul bloc.
+
+```text
+He fixed it. Nvlght (Exclusive on Nvlght) Then he left.   -> groupe retiré
+He fixed it. Nvlght(Exclusive on Nvlght) Then he left.    -> groupe retiré
+He fixed it. (Only on Nvlght) Nvlght Then he left.        -> groupe retiré
+```
+
+La branche avant est restreinte aux fermants non ASCII sans chiffre ASCII dans le
+jeton, sinon un numéro de chapitre `220 (` se ferait prendre pour un crochet. Une note `T/N`, `E/N` ou `Edited by` peut toutefois être
 touchée si elle porte le même motif étranger adjacent : sa conservation n'est pas une
 contrainte du modèle, mais cette possibilité ne justifie pas à elle seule la règle.
 
-La récupération de prose étrangère fait partie de **5c**. Si un mot ne porte qu'une
-seule lettre étrangère et que la phrase ne contient pas de point interne de domaine,
-les caractères de prose du mot sont conservés : `Fųck, this hurt!` devient
-`Fck, this hurt!`. Cette variante ajoute **2 mots dans 2 chapitres**.
+La récupération de prose étrangère fait partie de **5c**. Elle ne s'applique que si
+la phrase ne contient **qu'un seul** mot porteur d'une lettre étrangère, sans point
+interne de domaine : `Fųck, this hurt!` devient `Fck, this hurt!`. Plusieurs mots
+étrangers dans la même phrase, c'est le crédit qui s'épelle à travers elle, et la
+phrase part.
+
+```text
+Fųck, this hurt!                                  -> Fck, this hurt!   un mot, récupéré
+fluffy-Th ... orign ... rsts n ... NovlFir(.)nt   -> phrase nettoyée   cinq mots, crédit
+```
 
 Le seuil `<= 2` a été mesuré : il réintroduit `NvIight` dans `taming` 44, qui est un
 crédit. Une seule lettre étrangère est donc le seuil retenu. Il n'y a plus de 5d séparée.
@@ -205,13 +305,28 @@ pas protégées dans l'une ou l'autre sortie.
 | `PAIRS` | 11 paires | apparier et fermer une citation |
 | `QUOTES` | 10 caractères | reconnaître de la parole |
 | `SENTENCE_ENDS` | 9 caractères | couper les phrases |
-| `SPELLED_MIN_LETTERS` | 5 | seuil de l'épellation |
+| `SPELLED_MIN_LETTERS` | 4 | seuil de l'épellation |
 
 `PAIRS` sert à **supprimer**, `QUOTES` seulement à **lire**. C'est pourquoi les
 guillemets ASCII sont dans `QUOTES` et pas dans `PAIRS` : ils s'écrivent seuls
 (pouces, apostrophe) et y mettre exposerait à supprimer du texte.
 
 ## Mesures de référence
+
+Second corpus, 192 chapitres : 24 par roman et par source, huit premiers, huit au
+milieu, huit derniers.
+
+| Mesure | Valeur |
+|:--|--:|
+| Chapitres | 192 |
+| Mots bruts | 342 762 |
+| Mots en sortie | 342 377 |
+| Mots retirés | 385 |
+| Caractères hors prose | 0 |
+| Chapitres sales | 0 |
+| Écart avec la version publiée `0a81c77` | 0 chapitre |
+
+
 
 Contre la v32 publiée, sur 127 chapitres :
 
