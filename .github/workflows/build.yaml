@@ -16,6 +16,11 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  # Only these sources are compiled on every push. The rest of the published
+  # list is carried over from gh-pages and rebuilt into the index unchanged.
+  REBUILT_SOURCES: "en.chikari en.novelbuddy"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -61,9 +66,9 @@ jobs:
           fi
 
           reference=""
-          for source in sources/*; do
-            [[ -f "$source/Cargo.toml" ]] || continue
-            reference="$source"
+          for name in $REBUILT_SOURCES; do
+            [[ -f "sources/$name/Cargo.toml" ]] || continue
+            reference="sources/$name"
             break
           done
           test -n "$reference"
@@ -82,6 +87,25 @@ jobs:
 
       - uses: ./.github/actions/install-aidoku-cli
 
+      - name: Carry over the published packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p staging
+          if git fetch --depth=1 origin gh-pages; then
+            mkdir -p published
+            git archive FETCH_HEAD | tar -x -C published
+            if compgen -G "published/sources/*.aix" > /dev/null; then
+              cp published/sources/*.aix staging/
+              echo "carried over $(ls staging | wc -l) published packages"
+            else
+              echo "gh-pages holds no packages, the list will be rebuilt"
+            fi
+          else
+            echo "no gh-pages branch yet, the list will be rebuilt"
+          fi
+
       - name: Build sources
         shell: bash
         run: |
@@ -89,14 +113,12 @@ jobs:
 
           seed="$HOME/.cache/aidoku-target-seed"
 
-          # A source that fails or is skipped must not publish the package a
-          # previous run left behind.
-          rm -f sources/*/package.aix
-
-          for source in sources/*; do
+          for name in $REBUILT_SOURCES; do
+            source="sources/$name"
             [[ -f "$source/Cargo.toml" ]] || continue
 
             echo "::group::Packaging $source"
+            rm -f "$source/package.aix"
             (
               cd "$source"
               rm -rf target
@@ -105,12 +127,21 @@ jobs:
             )
             rm -rf "$source/target"
             test -s "$source/package.aix"
+            rm -f "staging/$name"-v*.aix
+            cp "$source/package.aix" "staging/$name.aix"
             echo "::endgroup::"
           done
 
       - name: Build source list
+        shell: bash
         run: |
-          aidoku build sources/*/package.aix --name "Aidoku Community Sources"
+          set -euo pipefail
+
+          if ! compgen -G "staging/*.aix" > /dev/null; then
+            echo "no package to publish" >&2
+            exit 1
+          fi
+          aidoku build staging/*.aix --output public --name "Aidoku Community Sources"
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4.7.2
