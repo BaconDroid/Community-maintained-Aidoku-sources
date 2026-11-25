@@ -521,9 +521,11 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 		while probe < chars.len() && (chars[probe].is_whitespace() || is_sign(chars[probe])) {
 			probe += 1;
 		}
+		// The scan stops at the end of the line: a bracket that is never closed
+		// answers "no pair" instead of running past the slice.
 		if let Some(open) = chars.get(probe).copied()
 			&& let Some(close) = bracket_close(open)
-			&& let Some(end) = matching_pair_index(chars, probe.., open, close)
+			&& let Some(end) = matching_pair_index(chars, probe..chars.len(), open, close)
 		{
 			return Some((probe, end + 1));
 		}
@@ -729,4 +731,15 @@ pub(crate) fn strip(block: &str) -> String {
 		}
 	}
 	kept.join("\n").trim_end().into()
+}
+
+#[cfg(test)]
+mod tests {
+	use aidoku_test::aidoku_test;
+
+	#[aidoku_test]
+	fn an_unclosed_bracket_after_a_credit_does_not_panic() {
+		let cleaned = super::strip("\u{444} (");
+		assert!(!cleaned.contains('\u{444}'));
+	}
 }
