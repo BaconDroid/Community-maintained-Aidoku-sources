@@ -1,4 +1,33 @@
 //! Match characters rather than wording: the injected credit rotates through Unicode look-alikes.
+//!
+//! `markdown.rs` calls `strip` once per paragraph when the `hide_watermark`
+//! setting is on. Three definitions carry every decision below: prose is the
+//! blocks `PROSE_BLOCKS` names plus the whitespace of any script; a sign is
+//! neither prose nor alphanumeric; a foreign character is outside prose and
+//! alphanumeric, which is how the credit spells itself.
+//!
+//! The rules run in this order, one block at a time:
+//!
+//! 1. `strip_injected` removes a credit spelled out letter by letter, keeping
+//!    the prose around it and snapping the gap it leaves to one space or a
+//!    step of four, so indentation keeps its rung;
+//! 2. `dialogue_line` keeps the quote a dialogue line opens with, and leaves an
+//!    em dash where the marks answer nothing;
+//! 3. `without_dead_pairs` removes the bracket groups that hold no prose, and
+//!    keeps the sentences inside one that holds a credit;
+//! 4. `sentences` cuts what is left into sentences, so a credit can go without
+//!    the sentence beside it;
+//! 5. `clean_line` decides each sentence on its own: a site name takes the
+//!    sentence, plain prose stays, and a credit is cleaned word by word;
+//! 6. `strip` glues the kept sentences back together.
+//!
+//! Two constraints come from the corpus and look like bugs otherwise. A domain
+//! names its extension in full, so `focusboost.sh:` in a script log stays a
+//! line of the story; and the extension of a real credit is styled like the
+//! rest of it, so a look-alike there still counts as a letter.
+//!
+//! This file is copied byte for byte into the other source: change one copy,
+//! copy it over, and check the two still match.
 
 use aidoku::alloc::{String, Vec};
 
@@ -452,7 +481,8 @@ fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
-			&& at > 0 && is_prose_char(chars[at - 1])
+			&& at > 0
+			&& is_prose_char(chars[at - 1])
 			&& is_domain_char(chars[at - 1])
 			&& {
 				let tail = chars
@@ -468,11 +498,14 @@ fn has_domain(sentence: &str) -> bool {
 				// The tail carries the extension. Three letters make it one, and a
 				// shorter one only counts when it ends the sentence there: a file
 				// name like `focusboost.sh:` is followed by more of the sentence.
+				// The credit styles its own letters, so a look-alike after the
+				// extension does not reopen the sentence.
 				tail > 1
-					&& tail < head && (tail > 2
-					|| chars[at + 1 + tail..]
-						.iter()
-						.all(|ch| SENTENCE_ENDS.contains(ch)))
+					&& tail < head
+					&& (tail > 2
+						|| chars[at + 1 + tail..]
+							.iter()
+							.all(|ch| SENTENCE_ENDS.contains(ch) || is_foreign(*ch)))
 			}
 	})
 }
@@ -769,5 +802,13 @@ mod tests {
 	fn a_contraction_keeps_its_apostrophe() {
 		let cleaned = super::strip("it wasn't \u{b0}* N  v  l  i  g  h  t *\u{b0} normal");
 		assert_eq!(cleaned, "it wasn't normal");
+	}
+
+	/// The credit styles the letters of its own extension, so a two-letter
+	/// extension still names a domain when a look-alike follows it.
+	#[aidoku_test]
+	fn a_styled_extension_still_names_a_domain() {
+		let cleaned = super::strip("The source of this c\u{1d4f8}ntent is freweovel.co\u{271}.");
+		assert_eq!(cleaned, "");
 	}
 }
