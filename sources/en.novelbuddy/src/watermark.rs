@@ -481,8 +481,7 @@ fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
 		chars[at] == '.'
-			&& at > 0
-			&& is_prose_char(chars[at - 1])
+			&& at > 0 && is_prose_char(chars[at - 1])
 			&& is_domain_char(chars[at - 1])
 			&& {
 				let tail = chars
@@ -498,14 +497,16 @@ fn has_domain(sentence: &str) -> bool {
 				// The tail carries the extension. Three letters make it one, and a
 				// shorter one only counts when it ends the sentence there: a file
 				// name like `focusboost.sh:` is followed by more of the sentence.
-				// The credit styles its own letters, so a look-alike after the
-				// extension does not reopen the sentence.
+				// A URL closes its path with a slash before the sentence ends, and
+				// the credit styles its own letters, so a look-alike after the
+				// extension does not reopen the sentence either.
+				let rest = &chars[at + 1 + tail..];
+				let rest = rest.strip_prefix(&['/']).unwrap_or(rest);
 				tail > 1
-					&& tail < head
-					&& (tail > 2
-						|| chars[at + 1 + tail..]
-							.iter()
-							.all(|ch| SENTENCE_ENDS.contains(ch) || is_foreign(*ch)))
+					&& tail < head && (tail > 2
+					|| rest
+						.iter()
+						.all(|ch| SENTENCE_ENDS.contains(ch) || is_foreign(*ch)))
 			}
 	})
 }
@@ -809,6 +810,15 @@ mod tests {
 	#[aidoku_test]
 	fn a_styled_extension_still_names_a_domain() {
 		let cleaned = super::strip("The source of this c\u{1d4f8}ntent is freweovel.co\u{271}.");
+		assert_eq!(cleaned, "");
+	}
+
+	/// A URL closes its path with a slash, which is not the sentence end the
+	/// file-name guard waits for; the address is still a domain, unlike the
+	/// colon that makes `focusboost.sh:` a line of the story.
+	#[aidoku_test]
+	fn a_url_path_slash_does_not_hide_the_domain() {
+		let cleaned = super::strip("Read more at https://freweovel.co/.");
 		assert_eq!(cleaned, "");
 	}
 }
