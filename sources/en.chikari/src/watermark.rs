@@ -2,9 +2,13 @@
 
 use aidoku::alloc::{String, Vec};
 
+/// The blocks a book is written in: the credit styles its words with letters
+/// from other scripts, but the site censors its own prose with Latin
+/// look-alikes, and those belong to the text.
 const PROSE_BLOCKS: &[(char, char)] = &[
 	('\u{0000}', '\u{007F}'), // Basic Latin
 	('\u{0080}', '\u{00FF}'), // Latin-1 Supplement
+	('\u{0100}', '\u{024F}'), // Latin Extended-A and B
 	('\u{2000}', '\u{206F}'), // General Punctuation
 ];
 
@@ -41,8 +45,8 @@ const SENTENCE_PAUSES: &[char] = &[',', ';', ':'];
 /// A line break ends a line, so it never separates two words.
 const LINE_BREAKS: &[char] = &['\n', '\r'];
 
-/// Prose is the three blocks, and whitespace from anywhere: a gap between two
-/// words is not a mark the credit left.
+/// Prose is the blocks of `PROSE_BLOCKS`, and whitespace from anywhere: a gap
+/// between two words is not a mark the credit left.
 fn is_prose_char(ch: char) -> bool {
 	ch.is_whitespace()
 		|| PROSE_BLOCKS
@@ -117,6 +121,11 @@ fn spelled_run(text: &[char], start: usize) -> Option<usize> {
 		return None;
 	}
 	if start > 0 && text[start - 1].is_alphanumeric() {
+		return None;
+	}
+	// An apostrophe belongs to the word it follows, so the run must not start
+	// inside a contraction.
+	if start > 1 && is_quote(text[start - 1]) && text[start - 2].is_alphabetic() {
 		return None;
 	}
 	if !is_separator(*text.get(start + 1)?) {
@@ -436,8 +445,9 @@ fn wrapped_text(line: &str, mark_end: usize) -> Option<String> {
 	(!inner.is_empty()).then(|| String::from(inner))
 }
 
-/// True when the sentence carries a domain-shaped token: a dot, a letter or digit
-/// before it, and two or three lowercase letters after it.
+/// True when the sentence carries a domain-shaped token: a dot, a letter, a
+/// digit or a hyphen before it, and at least two lowercase letters after it,
+/// fewer than the label carries before the dot.
 fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
@@ -455,7 +465,14 @@ fn has_domain(sentence: &str) -> bool {
 					.rev()
 					.take_while(|ch| is_domain_char(**ch))
 					.count();
-				tail > 1 && tail < head
+				// The tail carries the extension. Three letters make it one, and a
+				// shorter one only counts when it ends the sentence there: a file
+				// name like `focusboost.sh:` is followed by more of the sentence.
+				tail > 1
+					&& tail < head && (tail > 2
+					|| chars[at + 1 + tail..]
+						.iter()
+						.all(|ch| SENTENCE_ENDS.contains(ch)))
 			}
 	})
 }
@@ -736,5 +753,21 @@ mod tests {
 	fn an_unclosed_bracket_after_a_credit_does_not_panic() {
 		let cleaned = super::strip("\u{444} (");
 		assert!(!cleaned.contains('\u{444}'));
+	}
+
+	/// A file name is not a domain: `focusboost.sh: 600 points shifted` is a
+	/// line of a script log, and the sentence around it is the story.
+	#[aidoku_test]
+	fn a_file_name_is_not_a_domain() {
+		let cleaned = super::strip("focusboost.sh: 600 points shifted to Focus");
+		assert_eq!(cleaned, "focusboost.sh: 600 points shifted to Focus");
+	}
+
+	/// The apostrophe of a contraction belongs to the word: the spelled credit
+	/// that follows it must not swallow it.
+	#[aidoku_test]
+	fn a_contraction_keeps_its_apostrophe() {
+		let cleaned = super::strip("it wasn't \u{b0}* N  v  l  i  g  h  t *\u{b0} normal");
+		assert_eq!(cleaned, "it wasn't normal");
 	}
 }
