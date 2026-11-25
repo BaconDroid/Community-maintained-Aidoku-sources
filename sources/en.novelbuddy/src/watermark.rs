@@ -64,8 +64,8 @@ fn is_foreign(ch: char) -> bool {
 
 /// True when the word carries anything the prose blocks do not hold: a sign or
 /// a letter from another script.
-fn is_noisy(word: &str) -> bool {
-	word.chars().any(|ch| !is_prose_char(ch))
+fn is_noisy(text: impl IntoIterator<Item = char>) -> bool {
+	text.into_iter().any(|ch| !is_prose_char(ch))
 }
 
 fn is_separator(ch: char) -> bool {
@@ -207,6 +207,7 @@ fn strip_injected(markdown: &str) -> String {
 		while text.get(span + right + after) == Some(&' ') {
 			after += 1;
 		}
+		let resume = span + right + after;
 		let trailing = output.chars().rev().take_while(|ch| *ch == ' ').count();
 		let gap = trailing + after;
 		// Snap the gap around an injection down to its nearest bound: one space,
@@ -215,15 +216,12 @@ fn strip_injected(markdown: &str) -> String {
 		while output.ends_with(' ') {
 			output.pop();
 		}
-		if text
-			.get(span + right + after)
-			.is_some_and(|ch| !ch.is_whitespace())
-		{
+		if text.get(resume).is_some_and(|ch| !ch.is_whitespace()) {
 			for _ in 0..bound {
 				output.push(' ');
 			}
 		}
-		index = span + right + after;
+		index = resume;
 	}
 	output
 }
@@ -259,10 +257,10 @@ fn trim_noisy_walls(sentence: &str) -> Vec<&str> {
 	let words: Vec<&str> = sentence.split_whitespace().collect();
 	let mut start = 0;
 	let mut end = words.len();
-	while start < end && is_noisy(words[start]) {
+	while start < end && is_noisy(words[start].chars()) {
 		start += 1;
 	}
-	while end > start && is_noisy(words[end - 1]) {
+	while end > start && is_noisy(words[end - 1].chars()) {
 		end -= 1;
 	}
 	words[start..end].to_vec()
@@ -295,20 +293,17 @@ fn without_dead_pairs(line: &str) -> String {
 		let mut changed = false;
 		for (open, close_at) in pairs {
 			let content = &text[open + 1..close_at];
-			let foreign = content.iter().any(|ch| !is_prose_char(*ch));
+			let foreign = is_noisy(content.iter().copied());
 			// An empty pair is prose the site left behind, as in `Your
 			// Contribution: <>`: no letter of a credit is in it.
-			if !foreign {
-				continue;
-			}
-			if content.len() <= 1 {
+			if content.len() <= 1 || !foreign {
 				continue;
 			}
 			let inner: String = content.iter().collect();
 			let mut kept: Vec<String> = Vec::new();
 			for sentence in sentences(&inner) {
 				let words = trim_noisy_walls(&sentence);
-				if words.is_empty() || words.iter().any(|word| is_noisy(word)) {
+				if words.is_empty() || words.iter().any(|word| is_noisy(word.chars())) {
 					continue;
 				}
 				kept.push(words.join(" "));
@@ -341,11 +336,13 @@ fn dialogue_line(line: &str) -> String {
 			.trim_start_matches(|ch| is_sign(ch) || is_quote(ch) || ch == ' ')
 			.len();
 	let lead = &line[..lead_end];
-	if !lead.chars().any(is_quote) || !lead.chars().any(is_sign) {
+	let Some(quote) = lead.chars().find(|ch| is_quote(*ch)) else {
+		return dialogue_marks(line);
+	};
+	if !lead.chars().any(is_sign) {
 		return dialogue_marks(line);
 	}
 	let rest = &line[lead_end..];
-	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
 	// The closer need not be the last character: a line may close its speech
 	// and keep talking.
 	let closes = quote_counterpart(quote, true).is_some_and(|close| rest.contains(close));
@@ -617,9 +614,7 @@ fn is_sentence_punctuation(ch: char) -> bool {
 /// `***`, or a mark still holding the sentence's punctuation, as `#.` does.
 /// A bare `,` or `.` is the sentence's, not the credit's.
 fn is_mark_token(word: &str) -> bool {
-	!word.is_empty()
-		&& word.chars().all(|ch| !ch.is_alphanumeric())
-		&& word.chars().any(is_credit_mark)
+	word.chars().all(|ch| !ch.is_alphanumeric()) && word.chars().any(is_credit_mark)
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
@@ -680,7 +675,7 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 /// and at least one neighbour exists. A digit or a space beside it is a stat line
 /// or a detached parenthesis, not a domain broken up to dodge filters.
 fn bracket_inside_word(chars: &[char], at: usize, close: char) -> bool {
-	if chars.get(at + 1).is_none() || chars.get(at + 2) != Some(&close) {
+	if chars.get(at + 2) != Some(&close) {
 		return false;
 	}
 	let left = at.checked_sub(1).and_then(|index| chars.get(index));
@@ -713,7 +708,7 @@ fn clean_line(line: &str) -> Option<String> {
 		if has_domain(sentence) || has_broken_word(sentence) {
 			continue;
 		}
-		if sentence.find(|ch| !is_prose_char(ch)).is_none() {
+		if !is_noisy(sentence.chars()) {
 			parts.push(sentence.into());
 		} else if let Some(cleaned) = clean_credit_sentence(sentence) {
 			parts.push(cleaned);
