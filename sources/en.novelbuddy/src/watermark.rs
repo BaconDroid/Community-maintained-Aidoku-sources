@@ -1,10 +1,43 @@
 //! Match characters rather than wording: the injected credit rotates through Unicode look-alikes.
+//!
+//! `markdown.rs` calls `strip` once per paragraph when the `hide_watermark`
+//! setting is on. Three definitions carry every decision below: prose is the
+//! blocks `PROSE_BLOCKS` names plus the whitespace of any script; a sign is
+//! neither prose nor alphanumeric; a foreign character is outside prose and
+//! alphanumeric, which is how the credit spells itself.
+//!
+//! The rules run in this order, one block at a time:
+//!
+//! 1. `strip_injected` removes a credit spelled out letter by letter, keeping
+//!    the prose around it and snapping the gap it leaves to one space or a
+//!    step of four, so indentation keeps its rung;
+//! 2. `dialogue_line` keeps the quote a dialogue line opens with, and leaves an
+//!    em dash where the marks answer nothing;
+//! 3. `without_dead_pairs` removes the bracket groups that hold no prose, and
+//!    keeps the sentences inside one that holds a credit;
+//! 4. `sentences` cuts what is left into sentences, so a credit can go without
+//!    the sentence beside it;
+//! 5. `clean_line` decides each sentence on its own: a site name takes the
+//!    sentence, plain prose stays, and a credit is cleaned word by word;
+//! 6. `strip` glues the kept sentences back together.
+//!
+//! Two constraints come from the corpus and look like bugs otherwise. A domain
+//! names its extension in full, so `focusboost.sh:` in a script log stays a
+//! line of the story; and the extension of a real credit is styled like the
+//! rest of it, so a look-alike there still counts as a letter.
+//!
+//! This file is copied byte for byte into the other source: change one copy,
+//! copy it over, and check the two still match.
 
 use aidoku::alloc::{String, Vec};
 
+/// The blocks a book is written in: the credit styles its words with letters
+/// from other scripts, but the site censors its own prose with Latin
+/// look-alikes, and those belong to the text.
 const PROSE_BLOCKS: &[(char, char)] = &[
 	('\u{0000}', '\u{007F}'), // Basic Latin
 	('\u{0080}', '\u{00FF}'), // Latin-1 Supplement
+	('\u{0100}', '\u{024F}'), // Latin Extended-A and B
 	('\u{2000}', '\u{206F}'), // General Punctuation
 ];
 
@@ -41,8 +74,8 @@ const SENTENCE_PAUSES: &[char] = &[',', ';', ':'];
 /// A line break ends a line, so it never separates two words.
 const LINE_BREAKS: &[char] = &['\n', '\r'];
 
-/// Prose is the three blocks, and whitespace from anywhere: a gap between two
-/// words is not a mark the credit left.
+/// Prose is the blocks of `PROSE_BLOCKS`, and whitespace from anywhere: a gap
+/// between two words is not a mark the credit left.
 fn is_prose_char(ch: char) -> bool {
 	ch.is_whitespace()
 		|| PROSE_BLOCKS
@@ -64,8 +97,8 @@ fn is_foreign(ch: char) -> bool {
 
 /// True when the word carries anything the prose blocks do not hold: a sign or
 /// a letter from another script.
-fn is_noisy(word: &str) -> bool {
-	word.chars().any(|ch| !is_prose_char(ch))
+fn is_noisy(text: impl IntoIterator<Item = char>) -> bool {
+	text.into_iter().any(|ch| !is_prose_char(ch))
 }
 
 fn is_separator(ch: char) -> bool {
@@ -117,6 +150,11 @@ fn spelled_run(text: &[char], start: usize) -> Option<usize> {
 		return None;
 	}
 	if start > 0 && text[start - 1].is_alphanumeric() {
+		return None;
+	}
+	// An apostrophe belongs to the word it follows, so the run must not start
+	// inside a contraction.
+	if start > 1 && is_quote(text[start - 1]) && text[start - 2].is_alphabetic() {
 		return None;
 	}
 	if !is_separator(*text.get(start + 1)?) {
@@ -207,6 +245,7 @@ fn strip_injected(markdown: &str) -> String {
 		while text.get(span + right + after) == Some(&' ') {
 			after += 1;
 		}
+		let resume = span + right + after;
 		let trailing = output.chars().rev().take_while(|ch| *ch == ' ').count();
 		let gap = trailing + after;
 		// Snap the gap around an injection down to its nearest bound: one space,
@@ -215,15 +254,12 @@ fn strip_injected(markdown: &str) -> String {
 		while output.ends_with(' ') {
 			output.pop();
 		}
-		if text
-			.get(span + right + after)
-			.is_some_and(|ch| !ch.is_whitespace())
-		{
+		if text.get(resume).is_some_and(|ch| !ch.is_whitespace()) {
 			for _ in 0..bound {
 				output.push(' ');
 			}
 		}
-		index = span + right + after;
+		index = resume;
 	}
 	output
 }
@@ -259,10 +295,10 @@ fn trim_noisy_walls(sentence: &str) -> Vec<&str> {
 	let words: Vec<&str> = sentence.split_whitespace().collect();
 	let mut start = 0;
 	let mut end = words.len();
-	while start < end && is_noisy(words[start]) {
+	while start < end && is_noisy(words[start].chars()) {
 		start += 1;
 	}
-	while end > start && is_noisy(words[end - 1]) {
+	while end > start && is_noisy(words[end - 1].chars()) {
 		end -= 1;
 	}
 	words[start..end].to_vec()
@@ -295,20 +331,17 @@ fn without_dead_pairs(line: &str) -> String {
 		let mut changed = false;
 		for (open, close_at) in pairs {
 			let content = &text[open + 1..close_at];
-			let foreign = content.iter().any(|ch| !is_prose_char(*ch));
+			let foreign = is_noisy(content.iter().copied());
 			// An empty pair is prose the site left behind, as in `Your
 			// Contribution: <>`: no letter of a credit is in it.
-			if !foreign {
-				continue;
-			}
-			if content.len() <= 1 {
+			if content.len() <= 1 || !foreign {
 				continue;
 			}
 			let inner: String = content.iter().collect();
 			let mut kept: Vec<String> = Vec::new();
 			for sentence in sentences(&inner) {
 				let words = trim_noisy_walls(&sentence);
-				if words.is_empty() || words.iter().any(|word| is_noisy(word)) {
+				if words.is_empty() || words.iter().any(|word| is_noisy(word.chars())) {
 					continue;
 				}
 				kept.push(words.join(" "));
@@ -341,11 +374,13 @@ fn dialogue_line(line: &str) -> String {
 			.trim_start_matches(|ch| is_sign(ch) || is_quote(ch) || ch == ' ')
 			.len();
 	let lead = &line[..lead_end];
-	if !lead.chars().any(is_quote) || !lead.chars().any(is_sign) {
+	let Some(quote) = lead.chars().find(|ch| is_quote(*ch)) else {
+		return dialogue_marks(line);
+	};
+	if !lead.chars().any(is_sign) {
 		return dialogue_marks(line);
 	}
 	let rest = &line[lead_end..];
-	let quote = lead.chars().find(|ch| is_quote(*ch)).unwrap_or('"');
 	// The closer need not be the last character: a line may close its speech
 	// and keep talking.
 	let closes = quote_counterpart(quote, true).is_some_and(|close| rest.contains(close));
@@ -439,8 +474,9 @@ fn wrapped_text(line: &str, mark_end: usize) -> Option<String> {
 	(!inner.is_empty()).then(|| String::from(inner))
 }
 
-/// True when the sentence carries a domain-shaped token: a dot, a letter or digit
-/// before it, and two or three lowercase letters after it.
+/// True when the sentence carries a domain-shaped token: a dot, a letter, a
+/// digit or a hyphen before it, and at least two lowercase letters after it,
+/// fewer than the label carries before the dot.
 fn has_domain(sentence: &str) -> bool {
 	let chars: Vec<char> = sentence.chars().collect();
 	(0..chars.len()).any(|at| {
@@ -458,7 +494,19 @@ fn has_domain(sentence: &str) -> bool {
 					.rev()
 					.take_while(|ch| is_domain_char(**ch))
 					.count();
-				tail > 1 && tail < head
+				// The tail carries the extension. Three letters make it one, and a
+				// shorter one only counts when it ends the sentence there: a file
+				// name like `focusboost.sh:` is followed by more of the sentence.
+				// A URL closes its path with a slash before the sentence ends, and
+				// the credit styles its own letters, so a look-alike after the
+				// extension does not reopen the sentence either.
+				let rest = &chars[at + 1 + tail..];
+				let rest = rest.strip_prefix(&['/']).unwrap_or(rest);
+				tail > 1
+					&& tail < head && (tail > 2
+					|| rest
+						.iter()
+						.all(|ch| SENTENCE_ENDS.contains(ch) || is_foreign(*ch)))
 			}
 	})
 }
@@ -521,9 +569,11 @@ fn touching_bracket(chars: &[char]) -> Option<(usize, usize)> {
 		while probe < chars.len() && (chars[probe].is_whitespace() || is_sign(chars[probe])) {
 			probe += 1;
 		}
+		// The scan stops at the end of the line: a bracket that is never closed
+		// answers "no pair" instead of running past the slice.
 		if let Some(open) = chars.get(probe).copied()
 			&& let Some(close) = bracket_close(open)
-			&& let Some(end) = matching_pair_index(chars, probe.., open, close)
+			&& let Some(end) = matching_pair_index(chars, probe..chars.len(), open, close)
 		{
 			return Some((probe, end + 1));
 		}
@@ -615,9 +665,7 @@ fn is_sentence_punctuation(ch: char) -> bool {
 /// `***`, or a mark still holding the sentence's punctuation, as `#.` does.
 /// A bare `,` or `.` is the sentence's, not the credit's.
 fn is_mark_token(word: &str) -> bool {
-	!word.is_empty()
-		&& word.chars().all(|ch| !ch.is_alphanumeric())
-		&& word.chars().any(is_credit_mark)
+	word.chars().all(|ch| !ch.is_alphanumeric()) && word.chars().any(is_credit_mark)
 }
 
 fn clean_credit_sentence(text: &str) -> Option<String> {
@@ -678,7 +726,7 @@ fn clean_credit_sentence(text: &str) -> Option<String> {
 /// and at least one neighbour exists. A digit or a space beside it is a stat line
 /// or a detached parenthesis, not a domain broken up to dodge filters.
 fn bracket_inside_word(chars: &[char], at: usize, close: char) -> bool {
-	if chars.get(at + 1).is_none() || chars.get(at + 2) != Some(&close) {
+	if chars.get(at + 2) != Some(&close) {
 		return false;
 	}
 	let left = at.checked_sub(1).and_then(|index| chars.get(index));
@@ -711,7 +759,7 @@ fn clean_line(line: &str) -> Option<String> {
 		if has_domain(sentence) || has_broken_word(sentence) {
 			continue;
 		}
-		if sentence.find(|ch| !is_prose_char(ch)).is_none() {
+		if !is_noisy(sentence.chars()) {
 			parts.push(sentence.into());
 		} else if let Some(cleaned) = clean_credit_sentence(sentence) {
 			parts.push(cleaned);
@@ -729,4 +777,48 @@ pub(crate) fn strip(block: &str) -> String {
 		}
 	}
 	kept.join("\n").trim_end().into()
+}
+
+#[cfg(test)]
+mod tests {
+	use aidoku_test::aidoku_test;
+
+	#[aidoku_test]
+	fn an_unclosed_bracket_after_a_credit_does_not_panic() {
+		let cleaned = super::strip("\u{444} (");
+		assert!(!cleaned.contains('\u{444}'));
+	}
+
+	/// A file name is not a domain: `focusboost.sh: 600 points shifted` is a
+	/// line of a script log, and the sentence around it is the story.
+	#[aidoku_test]
+	fn a_file_name_is_not_a_domain() {
+		let cleaned = super::strip("focusboost.sh: 600 points shifted to Focus");
+		assert_eq!(cleaned, "focusboost.sh: 600 points shifted to Focus");
+	}
+
+	/// The apostrophe of a contraction belongs to the word: the spelled credit
+	/// that follows it must not swallow it.
+	#[aidoku_test]
+	fn a_contraction_keeps_its_apostrophe() {
+		let cleaned = super::strip("it wasn't \u{b0}* N  v  l  i  g  h  t *\u{b0} normal");
+		assert_eq!(cleaned, "it wasn't normal");
+	}
+
+	/// The credit styles the letters of its own extension, so a two-letter
+	/// extension still names a domain when a look-alike follows it.
+	#[aidoku_test]
+	fn a_styled_extension_still_names_a_domain() {
+		let cleaned = super::strip("The source of this c\u{1d4f8}ntent is freweovel.co\u{271}.");
+		assert_eq!(cleaned, "");
+	}
+
+	/// A URL closes its path with a slash, which is not the sentence end the
+	/// file-name guard waits for; the address is still a domain, unlike the
+	/// colon that makes `focusboost.sh:` a line of the story.
+	#[aidoku_test]
+	fn a_url_path_slash_does_not_hide_the_domain() {
+		let cleaned = super::strip("Read more at https://freweovel.co/.");
+		assert_eq!(cleaned, "");
+	}
 }
